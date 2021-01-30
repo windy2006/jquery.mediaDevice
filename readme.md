@@ -1,7 +1,7 @@
 整体描述：
 --------
 通过H5调用视频、频输入输出设备，包括可以调用摄像头拍照，调用音频输入设备录音，调用音频输出设备播放音乐，同时还可以捕捉音频波形。
-本插件可在PC或移动端使用，如果是移动端会判断手机方向是否正确，以保证拍摄正向的视频
+本插件可在PC或移动端使用，如果是移动端会判断手机方向是否正确，以保证拍摄正向的视频。
 请参考：[演示页面](https://windy2006.github.io/jquery.mediaDevice/)
 
 **注意：** 由于安全机制限制，相关组件只能在SSL（https）模式下使用。浏览器的兼容情况请参考 [官方文档](https://developer.mozilla.org/zh-CN/docs/Web/API/MediaDevices)
@@ -24,7 +24,7 @@
 
 设置方式：
 --------
-###camera 组件
+### camera 组件
 本组件需要作用于"video"标签，使用方法：
 ```javascript
 $(videoObj).camera(opt, callback_function);
@@ -118,7 +118,7 @@ $(videoObj).camera(opt, callback_function);
   
 - **constraints** ：返回当前媒体调用参数，具体情况见启动媒体控件
 
-###audio 组件
+### audio 组件
 本组件可作用于任意标签，如为audio标签，将在audio标签下添加波形图，如非audio标签，则会自动调用audio控件，并在调用标签下插入波形对象，使用方法：
 ```javascript
 $(obj).audio(opt);
@@ -133,7 +133,7 @@ $(obj).audio(opt);
 ```
 **波形绘制函数** ：本函数可由用户自定义，包含四个参数，分别是：data（音频数据）, canvas（画板对象）, width（画板宽）, height（画板高）
 
-###fullscreen 组件
+### fullscreen 组件
 本组件用于设置浏览器或任意支持全屏属性的对象，多对非全屏对象模拟全屏效果，使用方法：
 ```javascript
 $(obj).fullscreen(opt);
