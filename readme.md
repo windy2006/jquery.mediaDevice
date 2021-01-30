@@ -1,7 +1,9 @@
 整体描述：
 --------
 通过H5调用视频、频输入输出设备，包括可以调用摄像头拍照，调用音频输入设备录音，调用音频输出设备播放音乐，同时还可以捕捉音频波形。
+
 本插件可在PC或移动端使用，如果是移动端会判断手机方向是否正确，以保证拍摄正向的视频。
+
 请参考：[演示页面](https://windy2006.github.io/jquery.mediaDevice/)
 
 **注意：** 由于安全机制限制，相关组件只能在SSL（https）模式下使用。浏览器的兼容情况请参考 [官方文档](https://developer.mozilla.org/zh-CN/docs/Web/API/MediaDevices)
