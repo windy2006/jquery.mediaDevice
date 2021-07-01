@@ -58,6 +58,13 @@
 <script type="text/javascript" src="jquery.mediaDevice.js"></script>
 <script type="text/javascript">
 	$(function(){
+		let video_obj = $('video');
+		$('#scan').click(function(){
+			video_obj.camera('close');
+			video_obj.get(0).srcObject = null;
+		}).qrCode(function(code){
+			alert(code);
+		});
 		setTimeout(function(){
 			try {
 				let msg = new window.SpeechSynthesisUtterance();
@@ -68,7 +75,6 @@
 				$('#audio').audio({file:'./music/' + this.value});
 			}).prop("selectedIndex", 2).trigger('change');
 		}, 1000);
-		let video_obj = $('video');
 		video_obj.camera('enum', function(device_list){
 			let device = null;
 			if(typeof device_list['videoinput'] !== 'undefined') {
