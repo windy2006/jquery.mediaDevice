@@ -62,8 +62,6 @@
 		$('#scan').click(function(){
 			video_obj.camera('close');
 			video_obj.get(0).srcObject = null;
-		}).qrCode(function(code){
-			alert(code);
 		});
 		setTimeout(function(){
 			try {
