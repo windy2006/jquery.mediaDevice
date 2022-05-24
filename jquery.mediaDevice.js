@@ -24,6 +24,7 @@
              * echoCancellation  回音消除 （true/false）
              * autoGainControl   自动增益 （在原有录音的基础上是否增加音量， true/false）
              * noiseSuppression  是否开启降噪功能 （true/false）
+             * channelCount      声道数量 （例 1/2）
              */
             audio: {
                 volume: 1,
@@ -32,7 +33,7 @@
                 echoCancellation: true,
                 autoGainControl: false,
                 noiseSuppression: true,
-                channelCount: 2
+                channelCount: 1
             },
             /**
              * 【视频参数调整】
@@ -180,7 +181,6 @@
                     };
                 })
                 .catch(function(err) {
-                    alert("未检测到媒体设备或浏览器不支持媒体设备调用！");
                     console.log(err.name + ": " + err.message);
                 });
         }
@@ -224,8 +224,9 @@
             }
             let flag = false;
             let recorder = $(videoObj).data('recorder');
-            if(recorder===null) {
+            if(recorder==null) {
                 recorder = new MediaRecorder($(videoObj).data('stream'));
+                recorder.mimeType = 'video/mp4';
                 recorder.ondataavailable = func;
                 recorder.start();
                 $(videoObj).data('recorder', recorder);
@@ -236,7 +237,10 @@
                         $(videoObj).data('recorder', null);
                         videoObj.play();
                     })
-                }, 150);
+                    $(videoObj).one('pause', function() {
+                        $('#video').fullscreen('e');
+                    });
+                }, 1000);
                 flag = true;
             } else {
                 recorder.stop();
@@ -257,10 +261,14 @@
 
     //audio Functions
     $.fn.audio = function(opt) {
-        let canvasObj = this.get(0);
-        let audioObj = this.get(0);
-        let mainObj = this;
-        if(this.data('canvas')==null) {
+        let canvasObj, audioObj, func_show, dataArray;
+        let para = {},
+            mainObj = this,
+            constraints = {audio:default_constraints.audio, video:false},
+            effect_func = [effect_1, effect_2, effect_3];
+        if(this.data('audio')===undefined) {
+            canvasObj = this.get(0);
+            audioObj = this.get(0);
             let tagName = canvasObj.tagName.toLowerCase();
             if(tagName === 'audio') {
                 canvasObj = document.createElement('canvas');
@@ -275,74 +283,102 @@
             }
             this.data('canvas', canvasObj);
             this.data('audio', audioObj);
+            this.data('stop', 'n');
+            init_audio();
+            init_canvas();
+            mainObj.data('para', para);
         } else {
             canvasObj = this.data('canvas');
             audioObj = this.data('audio');
+            para = this.data('para');
         }
-        let canvasCtx = canvasObj.getContext("2d");
-        let WIDTH = canvasObj.offsetWidth;
-        let HEIGHT = canvasObj.offsetHeight;
-        let gradient = canvasCtx.createLinearGradient(0, 0, WIDTH/3, HEIGHT);
-        gradient.addColorStop(0, "#f500d8");
-        gradient.addColorStop(1, "#ceaf11");
-        if(!this.data('audioContext')) {
+        // 初始化变量
+        dataArray = new Uint8Array(para.audioAnalyser.frequencyBinCount);
+
+        if(typeof arguments[1] === 'undefined') {
+            arguments[1] = function(){return true;};
+        }
+        if(typeof(opt)==='string') {
+            switch(opt) {
+                case 'enum':
+                    enumerate(arguments[1]);
+                    break;
+                case 'record':
+                    return record(arguments[1], arguments[2]);
+            }
+        } else if(typeof(opt)==='object') {
+            Object.keys(default_constraints.audio).forEach((key) => {
+                if(typeof opt[key]!=='undefined')  {
+                    constraints.audio[key] = opt[key];
+                }
+            });
+            if(typeof opt.deviceId !== 'undefined') {
+                constraints.audio = {deviceId: opt.deviceId};
+            }
+            if(typeof opt.file !== 'undefined') {
+                musicWave();
+            } else {
+                soundWave();
+            }
+        }
+
+        function init_canvas() {
+            para.canvasCtx = canvasObj.getContext("2d");
+            para.canvasWidth = canvasObj.offsetWidth;
+            para.canvasHeight = canvasObj.offsetHeight;
+            para.gradient = para.canvasCtx.createLinearGradient(0, 0, para.canvasWidth/3, para.canvasHeight);
+            para.gradient.addColorStop(0, "#f500d8");
+            para.gradient.addColorStop(1, "#ceaf11");
             $(window).resize(function(){
-                gradient = canvasCtx.createLinearGradient(0, 0, WIDTH/3, HEIGHT);
-                gradient.addColorStop(0, "#f500d8");
-                gradient.addColorStop(1, "#ceaf11");
-                WIDTH = canvasObj.offsetWidth;
-                HEIGHT = canvasObj.offsetHeight;
+                para.gradient = para.canvasCtx.createLinearGradient(0, 0, para.canvasWidth/3, para.canvasHeight);
+                para.gradient.addColorStop(0, "#f500d8");
+                para.gradient.addColorStop(1, "#ceaf11");
+                para.canvasWidth = canvasObj.offsetWidth;
+                para.canvasHeight = canvasObj.offsetHeight;
             });
         }
-        
-        // 创建音频对象
-        let audioContext = this.data('audioContext') || new (window.AudioContext || window.webkitAudioContext || window.mozAudioContext)();
-        this.data('audioContext', audioContext);
-        // 获取声音源
-        let audioSource = audioContext.createBufferSource();
-        // 获取分析对象
-        let audioAnalyser = this.data('audioAnalyser');
-            if(!audioAnalyser) {
-                audioAnalyser = audioContext.createAnalyser();
-                audioAnalyser.minDecibels = -90;
-                audioAnalyser.maxDecibels = -10;
-                audioAnalyser.smoothingTimeConstant = 0.85;
-                audioAnalyser.fftSize = 1024;
-                this.data('audioAnalyser', audioAnalyser);
-            }
-        let processor = this.data('processor');
-            if(!processor) {
-                processor = audioContext.createScriptProcessor(1024);
-                processor.connect(audioContext.destination);
-                audioAnalyser.connect(processor);
-                this.data('processor', processor);
-            }
-        let waveShaper = audioContext.createWaveShaper();
-        let biquadFilter = audioContext.createBiquadFilter();
-        let gainNode = audioContext.createGain();
-        let convolver = audioContext.createConvolver();
 
-        let bufferLength = audioAnalyser.frequencyBinCount;
-        let dataArray = new Uint8Array(bufferLength);
-        let sound = this.data('sound');
-        let func = new Function();
+        function init_audio() {
+            // 创建音频对象
+            para.audioContext = new (window.AudioContext || window.webkitAudioContext || window.mozAudioContext)();
+            // 获取声音源
+            para.audioSource = para.audioContext.createBufferSource();
+            // 获取分析对象
+            para.audioAnalyser = para.audioContext.createAnalyser();
+            para.audioAnalyser.minDecibels = -90;
+            para.audioAnalyser.maxDecibels = -10;
+            para.audioAnalyser.smoothingTimeConstant = 0.85;
+            para.audioAnalyser.fftSize = 1024;
+            // 音频处理对象
+            para.processor = para.audioContext.createScriptProcessor(1024);
+            para.processor.connect(para.audioContext.destination);
+            para.audioAnalyser.connect(para.processor);
+            // 获取其他对象
+            para.waveShaper = para.audioContext.createWaveShaper();
+            para.biquadFilter = para.audioContext.createBiquadFilter();
+            para.convolver = para.audioContext.createConvolver();
+            para.gainNode = para.audioContext.createGain();
+            //para.gainNode.gain.value = 0;
+        }
 
-        let constraints = {audio:true,video:false};
-        opt = $.extend(opt, {});
-        if(typeof opt.device_id !== 'undefined') {
-            constraints.audio = {deviceId: device_id};
+        function enumerate(func) {
+            if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
+                navigator.mediaDevices.enumerateDevices()
+                    .then(function(devices){
+                        let result = {};
+                        devices.forEach(function(device) {
+                            if(device.kind.toLowerCase() === 'audioinput') result.push(device);
+                        });
+                        func(result);
+                    })
+                    .catch(function(err) {
+                        new Error(err.name + ": " + err.message)
+                    });
+            }
         }
-        if(typeof opt.func !== 'undefined') {
-            func = opt.func;
-        }
-        if(typeof opt.file !== 'undefined') {
-            musicWave();
-        } else {
-            soundWave();
-        }
-        mainObj.data('stop', 'n');
 
         function musicWave() {
+            let sound;
             let loadAudioElement = function(url) {
                 return new Promise(function(resolve, reject) {
                     audioObj.addEventListener('canplay', function() {
@@ -351,7 +387,11 @@
                     audioObj.addEventListener('play', function() {
                         mainObj.data('stop', 'y');
                         setTimeout(function(){
-                            func = Math.random()>0.5 ? effect_1 : effect_2;
+                            if(typeof opt.func === 'function') {
+                                func_show = opt.func;
+                            } else {
+                                func_show = effect_func[parseInt(3 * Math.random())];
+                            }
                             mainObj.data('stop', 'n');
                             show();
                         }, 100);
@@ -361,38 +401,28 @@
                     audioObj.controls = true;
                     audioObj.src = url;
                     audioObj.onpause = function(){
-                        mainObj.audio();
+                        soundWave();
                     }
 
                 });
             }
             loadAudioElement(opt.file).then(function(obj) {
-                sound = sound || audioContext.createMediaElementSource(obj);
+                if(typeof para.audioContext === 'undefined') return;
+                sound = sound || para.audioContext.createMediaElementSource(obj);
                 obj.onended = function() {
-                    sound.disconnect(audioAnalyser);
-                    sound.disconnect(audioContext.destination);
+                    sound.disconnect(para.audioAnalyser);
+                    sound.disconnect(para.audioContext.destination);
                     sound = null;
-                    processor.onaudioprocess = function() {};
-                    processor.disconnect();
-                    canvasCtx.clearRect(0, 0, WIDTH, HEIGHT);
+                    para.processor.onaudioprocess = function() {};
+                    para.processor.disconnect();
+                    para.canvasCtx.clearRect(0, 0, para.canvasWidth, para.canvasHeight);
                     mainObj.data('stop', 'y');
                 };
-                sound.connect(audioAnalyser);
-                sound.connect(audioContext.destination);
-                mainObj.data('sound', sound);
-                processor.onaudioprocess = function(e) {
-                    audioAnalyser.getByteTimeDomainData(dataArray);
+                sound.connect(para.audioAnalyser);
+                sound.connect(para.audioContext.destination);
+                para.processor.onaudioprocess = function(e) {
+                    para.audioAnalyser.getByteTimeDomainData(dataArray);
                 };
-                obj.play().then(function(){
-                    mainObj.data('stop', 'y');
-                    setTimeout(function(){
-                        func = Math.random()>0.5 ? effect_1 : effect_2;
-                        mainObj.data('stop', 'n');
-                        show();
-                    }, 100);
-                }).catch(function(e){
-                    console.log(e);
-                });
             }).catch(function(e) {
                 console.log(e);
             });
@@ -401,27 +431,31 @@
         function soundWave() {
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(stream) {
-                    audioContext.resume().then(() => {
-                        let source = audioContext.createMediaStreamSource(stream);
-                        source.connect(waveShaper);
-                        waveShaper.connect(biquadFilter);
-                        biquadFilter.connect(gainNode);
-                        convolver.connect(gainNode);
-                        gainNode.connect(audioAnalyser);
-                        audioAnalyser.connect(audioContext.destination);
+                    if(typeof para.audioContext === 'undefined') return;
+                    para.audioContext.resume().then(() => {
+                        let source = para.audioContext.createMediaStreamSource(stream);
+                        source.connect(para.waveShaper);
+                        para.waveShaper.connect(para.biquadFilter);
+                        para.biquadFilter.connect(para.gainNode);
+                        para.convolver.connect(para.gainNode);
+                        para.gainNode.connect(para.audioAnalyser);
+                        para.audioAnalyser.connect(para.audioContext.destination);
 
-                        waveShaper.oversample = '4x';
-                        biquadFilter.gain.setTargetAtTime(0, audioContext.currentTime, 0)
+                        para.waveShaper.oversample = '4x';
+                        para.biquadFilter.gain.setTargetAtTime(0, para.audioContext.currentTime, 0)
 
                         mainObj.data('stop', 'y');
                         setTimeout(function(){
-                            func = effect_3;
+                            if(typeof opt.func === 'function') {
+                                func_show = opt.func;
+                            } else {
+                                func_show = effect_func[parseInt(3 * Math.random())];
+                            }
                             mainObj.data('stop', 'n');
                             show();
                         }, 100);
                     });
                 }).catch(function(err) {
-                    alert("未检测到媒体设备或浏览器不支持媒体设备调用！");
                     console.log(err.name + ": " + err.message);
                 });
         }
@@ -429,11 +463,49 @@
         function show() {
             if(mainObj.data('stop')==='y') return;
             requestAnimationFrame(show);
-            audioAnalyser.getByteFrequencyData(dataArray);
-            canvasCtx.clearRect(0, 0, WIDTH, HEIGHT);
-            canvasCtx.fillStyle = 'rgb(240,240,240)';
-            canvasCtx.fillRect(0, 0, WIDTH, HEIGHT);
-            func(dataArray, canvasCtx, WIDTH, HEIGHT);
+            if(typeof para.audioAnalyser === 'undefined') return;
+            para.audioAnalyser.getByteFrequencyData(dataArray);
+            para.canvasCtx.clearRect(0, 0, para.canvasWidth, para.canvasHeight);
+            para.canvasCtx.fillStyle = 'rgb(240,240,240)';
+            para.canvasCtx.fillRect(0, 0, para.canvasWidth, para.canvasHeight);
+            func_show(dataArray, para.canvasCtx, para.canvasWidth, para.canvasHeight);
+        }
+
+        function record(func, format) {
+            let mediaRecorder = mainObj.data('mediaRecorder');
+            if(mediaRecorder==null) {
+                navigator.mediaDevices.getUserMedia(constraints)
+                    .then(function(stream) {
+                        mediaRecorder = new MediaRecorder(stream);
+                        mediaRecorder.mimeType = 'audio/webm';
+                        mediaRecorder.ondataavailable = function (e) {
+                            let chunks = e.data;
+                            if(chunks.size<500) return;
+                            if(format===undefined) {
+                                if(typeof func === 'function') func(chunks);
+                                mainObj.data('mediaRecorder', null);
+                            } else {
+                                const fileReader = new FileReader();
+                                fileReader.onload = function(e) {
+                                    para.audioContext.decodeAudioData(e.target.result, (audioBuffer) => {
+                                        let blob = buffer2wav(audioBuffer, format==='mp3');
+                                        if(typeof func === 'function') func(blob);
+                                        mainObj.data('mediaRecorder', null);
+                                    })
+                                }
+                                fileReader.readAsArrayBuffer(chunks);
+                            }
+                        }
+                        mediaRecorder.start();
+                        mainObj.data('mediaRecorder', mediaRecorder);
+                    }).catch(function(err) {
+                        console.log(err.name + ": " + err.message);
+                    });
+                return true;
+            } else {
+                mediaRecorder.stop();
+                return false;
+            }
         }
 
         function effect_1(data, canvas, width, height) {
@@ -459,7 +531,7 @@
                 canvas.lineTo(x, height - data[i]/256 * height);
                 x += step;
             }
-            canvas.fillStyle = gradient;
+            canvas.fillStyle = para.gradient;
             canvas.fill();
             canvas.closePath();
 
@@ -470,7 +542,7 @@
                 canvas.lineTo(x, height - data[i]/256 * height - Math.random() * 30)
                 x += step;
             }
-            canvas.strokeStyle = gradient;
+            canvas.strokeStyle = para.gradient;
             canvas.stroke();
             canvas.closePath();
         }
@@ -486,6 +558,82 @@
             barLength = width * Math.pow((tmp / 256), 2) * 0.7;
             canvas.fillStyle = 'rgb(' + (barLength+50) + ',50,50)';
             canvas.fillRect(0,0,barLength,height);
+        }
+
+        // 将 webm 格式的浏览器音频转码为 wav
+        function buffer2wav(aBuffer, mp3) {
+            let numOfChan = aBuffer.numberOfChannels,
+                btwLength = aBuffer.length * numOfChan * 2 + 44,
+                btwArrBuff = new ArrayBuffer(btwLength),
+                btwView = new DataView(btwArrBuff),
+                btwChnls = [],
+                btwIndex,
+                btwSample,
+                btwOffset = 0,
+                btwPos = 0;
+            setUint32(0x46464952); // "RIFF"
+            setUint32(btwLength - 8); // file length - 8
+            setUint32(0x45564157); // "WAVE"
+            setUint32(0x20746d66); // "fmt " chunk
+            setUint32(16); // length = 16
+            setUint16(1); // PCM (uncompressed)
+            setUint16(numOfChan);
+            setUint32(aBuffer.sampleRate);
+            setUint32(aBuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+            setUint16(numOfChan * 2); // block-align
+            setUint16(16); // 16-bit
+            setUint32(0x61746164); // "data" - chunk
+            setUint32(btwLength - btwPos - 4); // chunk length
+
+            function setUint16(data) {
+                btwView.setUint16(btwPos, data, true);
+                btwPos += 2;
+            }
+
+            function setUint32(data) {
+                btwView.setUint32(btwPos, data, true);
+                btwPos += 4;
+            }
+
+            for (btwIndex = 0; btwIndex < aBuffer.numberOfChannels; btwIndex++)
+                btwChnls.push(aBuffer.getChannelData(btwIndex));
+
+            while (btwPos < btwLength) {
+                for (btwIndex = 0; btwIndex < numOfChan; btwIndex++) {
+                    // interleave btwChnls
+                    btwSample = Math.max(-1, Math.min(1, btwChnls[btwIndex][btwOffset])); // clamp
+                    btwSample = (0.5 + btwSample < 0 ? btwSample * 32768 : btwSample * 32767) | 0; // scale to 16-bit signed int
+                    btwView.setInt16(btwPos, btwSample, true); // write 16-bit sample
+                    btwPos += 2;
+                }
+                btwOffset++; // next source sample
+            }
+
+            let wavHdr = lamejs.WavHeader.readHeader(new DataView(btwArrBuff));
+            let wavSamples = new Int16Array(btwArrBuff, wavHdr.dataOffset, wavHdr.dataLen / 2);
+
+            return mp3 ? wav2mp3(wavHdr.channels, wavHdr.sampleRate, wavSamples) : new Blob([btwArrBuff], {type: "audio/wav"});
+        }
+
+        // 将 wav 编码转换为 mp3（需要 lamejs 支持）
+        function wav2mp3(channels, sampleRate, samples) {
+            let buffer = [];
+            let mp3enc = new lamejs.Mp3Encoder(channels, sampleRate, 128);
+            let remaining = samples.length;
+            let samplesPerFrame = 1152;
+            for (let i = 0; remaining >= samplesPerFrame; i += samplesPerFrame) {
+                let mono = samples.subarray(i, i + samplesPerFrame);
+                let mp3buf = mp3enc.encodeBuffer(mono);
+                if (mp3buf.length > 0) {
+                    buffer.push(new Int8Array(mp3buf));
+                }
+                remaining -= samplesPerFrame;
+            }
+            let d = mp3enc.flush();
+            if(d.length > 0){
+                buffer.push(new Int8Array(d));
+            }
+            return new Blob(buffer, {type: 'audio/mp3'});
         }
 
         return this;
@@ -599,3 +747,39 @@
         return this;
     }
 })(jQuery);
+
+// dataURI 转 blob
+function dataURItoBlob(dataURI) {
+    // convert base64/URLEncoded data component to raw binary data held in a string
+    let byteString;
+    if (dataURI.split(',')[0].indexOf('base64') >= 0) {
+        byteString = atob(dataURI.split(',')[1]);
+    } else {
+        byteString = unescape(dataURI.split(',')[1]);
+    }
+
+    // separate out the mime component
+    const mimeString = dataURI
+        .split(',')[0]
+        .split(':')[1]
+        .split(';')[0];
+
+    // write the bytes of the string to a typed array
+    const ia = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+    }
+
+    return new Blob([ia], { type: mimeString });
+}
+
+// blob 转 dataURI
+function BlobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = _e => resolve(reader.result);
+        reader.onerror = _e => reject(reader.error);
+        reader.onabort = _e => reject(new Error("Read aborted"));
+        reader.readAsDataURL(blob);
+    });
+}
