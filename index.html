@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=UTF-8"/>
+	<title>视频设备调用及影音录制</title>
+	<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+	<link href="https://lf6-cdn-tos.bytecdntp.com/cdn/expire-1-M/bootstrap/4.5.3/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="p-3">
+<div class="container-fluid">
+	<div id="video_area" class="row">
+		<div class="col-12 mx-auto text-center">
+			<video id="video" width="100%" autoplay class="border" style="max-width:640px;" src="noise.mp4"></video>
+		</div>
+		<div class="col-12 text-center">
+			<span>音乐选择：</span>
+			<select id="music_list">
+				<option>hello.mp4</option>
+				<option>music.mp3</option>
+				<option>dulux.mp3</option>
+			</select>
+			<br />
+			<audio id="audio" class="w-100"></audio>
+		</div>
+		<div class="col-12 mx-auto text-center">
+			<label class="d-block">
+				<span>音频输入：</span>
+				<select id="list_audio">
+					<option value="">禁用声音</option>
+				</select>
+				<br />
+				<span>视频输入：</span>
+				<select id="list_camera">
+					<option value="user">默认摄像头</option>
+				</select>
+			</label>
+			<button id="btn_switch">开启</button>
+			<button id="btn_snap">截图</button>
+			<button id="btn_record_video">录像</button>
+			<button id="btn_record_audio">录音</button>
+		</div>
+		<div class="col-12 mx-auto text-center mt-5 d-none">
+			<fieldset id="snap_field" class="border text-left">
+				<legend class="d-inline border text-left ml-3 w-auto px-3">截图</legend>
+				<div id="image_list"></div>
+			</fieldset>
+			<a id="post_image" href="javascript:void(0);" class='btn btn-primary'>获取截图</a>
+		</div>
+		<div class="col-12 mx-auto text-center mt-5 d-none">
+			<fieldset id="capture_field_video" class="border text-left mb-3">
+				<legend class="d-inline border text-left ml-3 w-auto px-3">录像</legend>
+				<div id="video_list"></div>
+			</fieldset>
+			<a id="post_video" href="javascript:void(0);" class='btn btn-primary'>获取视频</a>
+		</div>
+		<div class="col-12 mx-auto text-center mt-5 d-none">
+			<fieldset id="capture_field_audio" class="border text-left mb-3">
+				<legend class="d-inline border text-left ml-3 w-auto px-3">录音</legend>
+				<div id="audio_list"></div>
+			</fieldset>
+			<a id="post_audio" href="javascript:void(0);" class='btn btn-primary'>获取音频</a>
+		</div>
+	</div>
+</div>
+</body>
+<script type="text/javascript" src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/jquery/3.5.1/jquery.min.js"></script>
+<script type="text/javascript" src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/lamejs/1.2.1/lame.min.js"></script>
+<script type="text/javascript" src="jquery.mediaDevice.js"></script>
+<script type="text/javascript">
+	$(function(){
+		let video_obj = $('video');
+		setTimeout(function(){
+			try {
+				let msg = new window.SpeechSynthesisUtterance();
+				msg.text = '开始播放音频，并显示波形';
+				window.speechSynthesis.speak(msg);
+			} catch (e) {}
+			$('#music_list').change(function(e){
+				$('#audio').audio({file:'./music/' + this.value});
+			}).prop("selectedIndex", 2).trigger('change');
+		}, 1000);
+		video_obj.camera('enum', function(device_list){
+			let device = null;
+			if(typeof device_list['videoinput'] !== 'undefined') {
+				for(let x in device_list['videoinput']) {
+					device = device_list['videoinput'][x];
+					let opt = document.createElement("option");
+					opt.value = device.deviceId || device.id || device.groupId;
+					opt.appendChild(document.createTextNode(device.label || ('Video - '+opt.value.substr(0,10))));
+					document.querySelector('#list_camera').appendChild(opt);
+					$('#list_camera').prop('selectedIndex', 1);
+				}
+			}
+			if(typeof device_list['audioinput'] !== 'undefined') {
+				for(let x in device_list['audioinput']) {
+					device = device_list['audioinput'][x];
+					let opt = document.createElement("option");
+					opt.value = device.deviceId || device.id || device.groupId;
+					opt.appendChild(document.createTextNode(device.label || ('Audio - '+opt.value.substr(0,10))));
+					document.querySelector('#list_audio').appendChild(opt);
+					$('#list_audio').prop('selectedIndex', 1);
+				}
+			}
+			$('#btn_switch').click();
+		});
+		$('#btn_switch').click(function(){
+			if(video_obj.data('stream')==null) {
+				let opt = video_obj.camera('setting');
+				let device_audio = $('#list_audio').val();
+				let device_video = $('#list_camera').val();
+				if($('#list_audio').prop('selectedIndex')===0) {
+					opt.audio = false;
+				} else {
+					if(device_audio!=='default') {
+						opt.audio.deviceId = device_audio;
+					}
+				}
+				if($('#list_camera').prop('selectedIndex')>0) {
+					delete opt.video.facingMode;
+					opt.video.deviceId = device_video;
+				} else {
+					opt.video.facingMode = device_video;
+				}
+				//opt.video.rate = 4/3;  //长宽比预置
+				video_obj.camera(opt);
+				$(this).text('关闭');
+			} else {
+				video_obj.camera('close');
+				$(this).text('开启');
+			}
+		});
+		$('#btn_snap').click(function(){
+			video_obj.camera('snap', function(data){
+				let container = $('<div>').css({'position':'relative','float':'left'}).appendTo('#image_list');
+				let imageTag = document.createElement('img');
+				let file = dataURItoBlob(data);
+				$(imageTag).attr({
+								width:300,
+								src:data
+							})
+						.addClass('m-2 border rounded')
+						.css('opacity',0.3)
+						.hover(
+								function(){$(this).css('opacity', 1)},
+								function(){$(this).css('opacity', 0.4)}
+						)
+						.appendTo(container);
+				let closeTag = $('<button type="button" class="btn btn-secondary close">&times;</button>');
+				closeTag.css({
+					position: 'absolute',
+					top: 10,
+					right: 10,
+					width: 28,
+					height:28,
+					padding: 0
+				}).appendTo(container)
+						.data('file', file)
+						.click(function(){
+							$(this).parentsUntil('#image_list').remove();
+							if($('#image_list > div').length===0) {
+								$('#snap_field').parent().addClass('d-none');
+							}
+						});
+				$('#snap_field').parent().removeClass('d-none');
+			});
+		});
+		$('#btn_record_video').click(function(){
+			$('#audio').data('audio').pause();
+			let result = video_obj.camera('record', function (e) {
+				let chunks = e.data;
+				if(chunks.size<500) return;
+				let file = new File([chunks], 'record-' + (new Date).toISOString().replace(/:|\./g, '-') + '.mp4', {
+					type: 'video/mp4'
+				});
+				let container = $('<div>').css({'position':'relative','float':'left'}).appendTo('#video_list');
+				let videoTag = document.createElement('video');
+				videoTag.width = video_obj.width();
+				videoTag.height = video_obj.height();
+				videoTag.controls = true;
+				videoTag.src = window.URL.createObjectURL(chunks);
+				$(videoTag).attr({width:320,height:240})
+						.addClass('m-2 border rounded')
+						.css('opacity',0.3)
+						.hover(
+								function(){$(this).css('opacity', 1)},
+								function(){$(this).css('opacity', 0.4)}
+						)
+						.appendTo(container);
+				let closeTag = $('<button type="button" class="btn btn-secondary close">&times;</button>');
+				closeTag.css({
+					position: 'absolute',
+					top: 10,
+					right: 10,
+					width: 28,
+					height:28,
+					padding: 0
+				  }).appendTo(container)
+					.data('file', file)
+					.click(function(){
+						$(this).parentsUntil('#video_list').remove();
+						if($('#video_list > div').length===0) {
+							$('#capture_field_video').parent().addClass('d-none');
+						}
+					});
+				$('#capture_field_video').parent().removeClass('d-none');
+				video_obj.data('recorder', null);
+			});
+			$(document).one('fullscreenchange', function(){
+				$('#btn_record_video').text('录像');
+			})
+			if(result) {
+				$(this).text('停止');
+			} else {
+				$(this).text('录像');
+			}
+		});
+		$('#btn_record_audio').click(function(){
+			$('#audio').data('audio').pause();
+			let result = $('#audio').audio('record', function(blob){
+				const file = new File([blob], "record_"+Math.round(new Date().getTime()/1000) +".mp3", {type: 'audio/mp3'});
+				let audioTag = document.createElement('audio');
+				audioTag.controls = true;
+				audioTag.muted = false;
+				audioTag.src = window.URL.createObjectURL(blob);
+				$(audioTag).attr({width:'100%',height:30})
+						.addClass('mx-3')
+						.css('opacity',0.3)
+						.hover(
+								function(){$(this).css('opacity', 1)},
+								function(){$(this).css('opacity', 0.4)}
+						);
+				let container = $('<div>').css({'position':'relative','float':'left'}).append($(audioTag)).appendTo('#audio_list');
+				$('#capture_field_audio').parent().removeClass('d-none');
+
+				let closeTag = $('<button type="button" class="btn btn-secondary close">X</button>');
+				closeTag.css({
+					position: 'absolute',
+					'font-size': '10px',
+					top: 0,
+					right: 0,
+					width: 16,
+					height:16,
+					padding: 0
+				}).appendTo(container)
+						.data('file', file)
+						.click(function(){
+							$(this).parentsUntil('#audio_list').remove();
+							if($('#audio_list > div').length===0) {
+								$('#capture_field_audio').parent().addClass('d-none');
+							}
+						});
+			}, 'mp3');
+			if(result) {
+				$(this).text('停止');
+			} else {
+				$(this).text('录音');
+			}
+		});
+		$('#list_audio').change(function(){
+			video_obj.camera('close');
+			$('#btn_switch').trigger('click');
+		});
+		$('#list_camera').change(function(){
+			video_obj.camera('close');
+			$('#btn_switch').trigger('click');
+		});
+	});
+	function getVideos() {
+		let files = [];
+		let size = 0;
+		$('#video_list .close').each(function(){
+			if($(this).data('file').size<size) {
+				files.push($(this).data('file'));
+			} else {
+				files.unshift($(this).data('file'));
+			}
+			size = $(this).data('file').size;
+		})
+		return files;
+	}
+	$('#post_video').click(function(){
+		let videos = getVideos();
+		console.log(videos);
+		alert('已获取 '+videos.length+' 个视频，请在控制台查看！');
+	});
+	function getAudios() {
+		let files = [];
+		let size = 0;
+		$('#audio_list .close').each(function(){
+			if($(this).data('file').size<size) {
+				files.push($(this).data('file'));
+			} else {
+				files.unshift($(this).data('file'));
+			}
+			size = $(this).data('file').size;
+		})
+		return files;
+	}
+	$('#post_audio').click(function(){
+		let audios = getAudios();
+		console.log(audios);
+		alert('已获取 '+audios.length+' 个音频，请在控制台查看！');
+	});
+	function getImages() {
+		let files = [];
+		let size = 0;
+		$('#image_list .close').each(function(){
+			if($(this).data('file').size<size) {
+				files.push($(this).data('file'));
+			} else {
+				files.unshift($(this).data('file'));
+			}
+			size = $(this).data('file').size;
+		})
+		return files;
+	}
+	$('#post_image').click(function(){
+		let images = getImages();
+		console.log(images);
+		alert('已获取 '+images.length+' 个视频截图，请在控制台查看！');
+	});
+</script>
+</html>
