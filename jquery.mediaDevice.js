@@ -7,6 +7,8 @@
  *
  * Licensed under the Apache License Version 2.0
  *
+ * Release at https://github.com/windy2006/jquery.mediaDevice
+ *
  * Dependencies
  * ------------
  * jQuery (http://jquery.com)
@@ -191,8 +193,12 @@
                 });
                 $(videoObj).data('stream', null);
                 videoObj.pause();
-                videoObj.src = '';
+                videoObj.setAttribute("playsinline", false);
+                videoObj.srcObject = null;
+                videoObj.loop = true;
+                videoObj.src = 'noise.mp4';
                 videoObj.load();
+                videoObj.play();
             }
             if(typeof func === 'function') func();
         }
@@ -508,7 +514,7 @@
             }
         }
 
-        function effect_1(data, canvas, width, height) {
+        function effect_1(data, canvas, width, height) { //音柱
             let length = data.length;
             let barWidth = 10;
             let barHeight;
@@ -521,7 +527,7 @@
             }
         }
 
-        function effect_2(data, canvas, width, height) {
+        function effect_2(data, canvas, width, height) { //音波
             let length = data.length;
             let step = width / length;
             let x = 0;
@@ -547,7 +553,7 @@
             canvas.closePath();
         }
 
-        function effect_3(data, canvas, width, height) {
+        function effect_3(data, canvas, width, height) { //横条
             let length = data.length;
             let barLength = 0;
             let tmp = 0;

@@ -11,7 +11,7 @@
 <div class="container-fluid">
 	<div id="video_area" class="row">
 		<div class="col-12 mx-auto text-center">
-			<video id="video" width="100%" autoplay class="border" style="max-width:640px;"></video>
+			<video id="video" width="100%" autoplay class="border" style="max-width:640px;" src="noise.mp4"></video>
 		</div>
 		<div class="col-12 text-center">
 			<span>音乐选择：</span>
@@ -70,10 +70,6 @@
 <script type="text/javascript">
 	$(function(){
 		let video_obj = $('video');
-		$('#scan').click(function(){
-			video_obj.camera('close');
-			video_obj.get(0).srcObject = null;
-		});
 		setTimeout(function(){
 			try {
 				let msg = new window.SpeechSynthesisUtterance();
