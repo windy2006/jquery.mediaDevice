@@ -15,785 +15,929 @@
  *
  **/
 
-(function($){
-    let constraints = {},
-        default_constraints = {
-            /**
-             * 【音频参数调整】
-             * volume            音量调整（范围 0-1.0， 0为静音，1为最大声）
-             * sampleRate        采样率 （例 8000）
-             * sampleSize        采样大小 （例 16位 2字节）
-             * echoCancellation  回音消除 （true/false）
-             * autoGainControl   自动增益 （在原有录音的基础上是否增加音量， true/false）
-             * noiseSuppression  是否开启降噪功能 （true/false）
-             * channelCount      声道数量 （例 1/2）
-             */
-            audio: {
-                volume: 1,
-                sampleRate: 22050,
-                sampleSize: 16,
-                echoCancellation: true,
-                autoGainControl: false,
-                noiseSuppression: true,
-                channelCount: 1
-            },
-            /**
-             * 【视频参数调整】
-             * width        视频宽度
-             * height       视频高度
-             * aspectRatio  比例（一般可不设置，只设置宽高即可，可用来获取宽高比）
-             * frameRate    帧率（可通过帧率设置码流，帧率越高，码流越大，视频越平滑）
-             * facingMode   摄像头（PC会忽略，手机端可区分）
-             *              user           前置摄像头
-             *              environment    后置摄像头
-             *              left           前置左侧摄像头
-             *              right          前置右侧摄像头
-             * resizeMode   采集画面是否裁剪
-             *              none           不裁剪
-             *              crop-and-scale 裁剪
-             */
-            video: {
-                width: { min: 1024, ideal: 1280, max: 1920 },
-                height: { min: 576, ideal: 720, max: 1080 },
-                aspectRatio: 1.777777778,   //16:9
-                frameRate: {min: 15, ideal: 20, max: 30 },
-                facingMode: "user",
-                resizeMode: "none"
-            },
-            /**
-             * 【其他参数】
-             * latency           延迟大小 （ 延迟小，网络不好的情况下，会卡顿花屏等，好处在于可实时通信，建议200ms）
-             *                           （ 延迟大，网络不好的情况下，画面相对更平滑流畅，但即时性较差）
-             * channelCount      单/双声道
-             * deviceID          多个摄像头或音频输入输出设备时，可进行设备切换（例如切换前后置摄像头）
-             * groupID           同一组设备
-             */
-        };
+(function ($) {
+  let mediaSerial = 0;
+  const default_constraints = {
+    /**
+     * 【音频参数调整】
+     * volume            音量调整（范围 0-1.0， 0为静音，1为最大声）
+     * sampleRate        采样率 （例 8000）
+     * sampleSize        采样大小 （例 16位 2字节）
+     * echoCancellation  回音消除 （true/false）
+     * autoGainControl   自动增益 （在原有录音的基础上是否增加音量， true/false）
+     * noiseSuppression  是否开启降噪功能 （true/false）
+     * channelCount      声道数量 （例 1/2）
+     */
+    audio: {
+      volume: 1,
+      sampleRate: 22050,
+      sampleSize: 16,
+      echoCancellation: true,
+      autoGainControl: false,
+      noiseSuppression: true,
+      channelCount: 1,
+    },
+    /**
+     * 【视频参数调整】
+     * width        视频宽度
+     * height       视频高度
+     * aspectRatio  比例（一般可不设置，只设置宽高即可，可用来获取宽高比）
+     * frameRate    帧率（可通过帧率设置码流，帧率越高，码流越大，视频越平滑）
+     * facingMode   摄像头（PC会忽略，手机端可区分）
+     *              user           前置摄像头
+     *              environment    后置摄像头
+     *              left           前置左侧摄像头
+     *              right          前置右侧摄像头
+     * resizeMode   采集画面是否裁剪
+     *              none           不裁剪
+     *              crop-and-scale 裁剪
+     */
+    video: {
+      width: { min: 1024, ideal: 1280, max: 1920 },
+      height: { min: 576, ideal: 720, max: 1080 },
+      aspectRatio: 1.777777778, //16:9
+      frameRate: { min: 15, ideal: 20, max: 30 },
+      facingMode: "user",
+      resizeMode: "none",
+    },
+    /**
+     * 【其他参数】
+     * latency           延迟大小 （ 延迟小，网络不好的情况下，会卡顿花屏等，好处在于可实时通信，建议200ms）
+     *                           （ 延迟大，网络不好的情况下，画面相对更平滑流畅，但即时性较差）
+     * channelCount      单/双声道
+     * deviceID          多个摄像头或音频输入输出设备时，可进行设备切换（例如切换前后置摄像头）
+     * groupID           同一组设备
+     */
+  };
 
-
-    function notify(target, error, kind) {
-        const messages = {
-            NotFoundError: '未检测到可用的' + (kind === 'audio' ? '麦克风' : '摄像头或麦克风') + '，请连接设备后重试。',
-            DevicesNotFoundError: '未检测到媒体设备，请连接设备后重试。',
-            NotAllowedError: '媒体访问被拒绝，请在浏览器的网站权限中允许摄像头或麦克风，然后重试。',
-            PermissionDeniedError: '媒体访问被拒绝，请检查浏览器的网站权限。',
-            NotReadableError: '设备无法读取，可能正被其他程序占用，请关闭占用程序后重试。',
-            TrackStartError: '设备无法启动，可能正被其他程序占用。',
-            OverconstrainedError: '当前设备不支持所选参数，请切换设备或降低分辨率后重试。',
-            SecurityError: '浏览器阻止了媒体访问，请使用 HTTPS 并检查网站权限。'
-        };
-        const message = messages[error.name] || error.message || '媒体设备调用失败，请检查设备连接及浏览器权限。';
-        const obj = $(target), id = kind === 'audio' ? 'audio' : 'camera';
-        let notice = obj.data('mediaNotice-' + id);
-        if (!notice || !notice[0].isConnected) {
-            notice = $('<div role="alert" class="alert alert-warning my-2 media-notice">').css({textAlign:'left', fontSize:14});
-            obj.after(notice); obj.data('mediaNotice-' + id, notice);
-        }
-        notice.text(message).show();
-        obj.trigger('media:error', [{message, name: error.name || 'Error', kind: id, error}]);
-    }
-    function available(target, kind) {
-        if (!window.isSecureContext) { notify(target, new Error('媒体设备需要 HTTPS；本机也可通过 localhost 访问。'), kind); return false; }
-        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-            notify(target, new Error('当前浏览器不支持媒体设备调用，请使用支持摄像头/麦克风的浏览器。'), kind); return false;
-        }
-        return true;
-    }
-    function clearNotice(target, kind) {
-        const notice = $(target).data('mediaNotice-' + kind); if (notice) notice.hide();
-    }
-    function safePlay(media) {
-        const promise = media.play(); if (promise) promise.catch(function () {});
-    }
-    // Video Functions
-    $.fn.camera = function(opt) {
-        let videoObj = this.get(0);
-        if(typeof(opt)==='object') {
-            $.extend(constraints, default_constraints, opt);
-            opt = 'start';
-        }
-        if(typeof arguments[1] === 'undefined') {
-            arguments[1] = function(){return true;};
-        }
-        switch(opt) {
-            case 'e':
-            case 'enum':
-                enumerate(arguments[1]);
-                break;
-            case 'constraints':
-            case 'setting':
-                return JSON.parse(JSON.stringify(default_constraints));
-            case 'n':
-            case 'snap':
-                snap(arguments[1]);
-                break;
-            case 'r':
-            case 'record':
-                try { return record(arguments[1]); } catch (error) { notify(videoObj, error, 'camera'); return false; }
-            case 'c':
-            case 'close':
-                close(arguments[1]);
-                break;
-            case 's':
-            case 'start':
-            default:
-                videoObj.volume = 0;
-                if(constraints.mirror) this.css('transform', 'rotateY(180deg)');
-                if(typeof constraints.audio === 'undefined') {
-                    constraints = JSON.parse(JSON.stringify(default_constraints));
-                }
-                start(arguments[1]);
-        }
-
-        function start(func) {
-            close();
-            if (!available(videoObj, 'camera')) return;
-            clearNotice(videoObj, 'camera');
-            const request = {};
-            $(videoObj).data('cameraRequest', request);
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(function(stream) {
-                    if ($(videoObj).data('cameraRequest') !== request) { stream.getTracks().forEach(track => track.stop()); return; }
-                    if (constraints.video !== false && !stream.getVideoTracks().length) {
-                        stream.getTracks().forEach(track => track.stop());
-                        throw new DOMException('未检测到可用摄像头', 'NotFoundError');
-                    }
-                    videoObj.onloadedmetadata = function(event) {
-                        if (typeof func === 'function') func(event);
-                        safePlay(videoObj);
-                        $(videoObj).trigger('media:ready');
-                    };
-                    videoObj.srcObject = stream;
-                    videoObj.muted = true;
-                    videoObj.setAttribute('playsinline', '');
-                    $(videoObj).data('stream', stream).data('recorder', null);
-                    clearNotice(videoObj, 'camera');
-                    safePlay(videoObj);
-                }).catch(function(error) {
-                    if ($(videoObj).data('cameraRequest') === request) { $(videoObj).removeData('cameraRequest'); notify(videoObj, error, 'camera'); }
-                });
-        }
-        function close(func) {
-            $(videoObj).removeData('cameraRequest');
-            const activeRecorder = $(videoObj).data('recorder');
-            if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
-            if($(videoObj).data('stream')!=null) {
-                $(videoObj).data('stream').getTracks().forEach(function(track){
-                    track.stop();
-                });
-                $(videoObj).data('stream', null);
-                videoObj.pause();
-                videoObj.setAttribute("playsinline", false);
-                videoObj.srcObject = null;
-                videoObj.loop = true;
-                videoObj.src = 'noise.mp4';
-                videoObj.load();
-                safePlay(videoObj);
-            }
-            if(typeof func === 'function') func();
-        }
-
-        function enumerate(func) {
-            if (!available(videoObj, 'camera') || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
-                if (typeof func === 'function') func({}); return;
-            }
-            navigator.mediaDevices.enumerateDevices().then(function(devices) {
-                const result = {};
-                devices.forEach(device => { (result[device.kind] || (result[device.kind] = [])).push(device); });
-                if (!(result.videoinput || []).length) notify(videoObj, new DOMException('未发现摄像头', 'NotFoundError'), 'camera');
-                if (typeof func === 'function') func(result);
-            }).catch(function(error) { notify(videoObj, error, 'camera'); if (typeof func === 'function') func({}); });
-        }
-        function record(func) {
-            const stream = $(videoObj).data('stream');
-            if (!stream || !stream.getVideoTracks().some(track => track.readyState === 'live')) {
-                notify(videoObj, new Error('摄像头尚未开启或已断开，请先开启摄像头。'), 'camera'); return false;
-            }
-            if (!window.MediaRecorder) { notify(videoObj, new Error('当前浏览器不支持录像。'), 'camera'); return false; }
-            if("onorientationchange" in window) {
-                window.onorientationchange = function(e) {
-                    if(window.orientation!==0 && window.orientation!==90) {
-                        alert('请反转您的移动设备，以保证所拍摄视频可以正常查看！');
-                        return false;
-                    }
-                }
-            }
-            let flag = false;
-            let recorder = $(videoObj).data('recorder');
-            if(recorder==null) {
-                let videoType = ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'].find(type => MediaRecorder.isTypeSupported(type));
-                recorder = new MediaRecorder($(videoObj).data('stream'), videoType ? {mimeType: videoType} : undefined);
-                recorder.ondataavailable = func;
-                recorder.start();
-                $(videoObj).data('recorder', recorder);
-                $('#video').fullscreen('r');
-                setTimeout(function(){
-                    $(document).one('fullscreenchange', function(){
-                        if (recorder.state !== 'inactive') recorder.stop();
-                        $(videoObj).data('recorder', null);
-                        safePlay(videoObj);
-                    })
-                    $(videoObj).one('pause', function() {
-                        $('#video').fullscreen('e');
-                    });
-                }, 1000);
-                flag = true;
-            } else {
-                recorder.stop();
-                $(videoObj).data('recorder', null);
-            }
-            return flag;
-        }
-        function snap(func) {
-            if (!videoObj || videoObj.readyState < 2 || !videoObj.videoWidth) { notify(videoObj, new Error('摄像头画面尚未就绪，请先开启摄像头后再截图。'), 'camera'); return; }
-            let canvas = document.createElement('canvas');
-            canvas.width = $(videoObj).width();
-            canvas.height = $(videoObj).height();
-            let context = canvas.getContext('2d');
-            context.drawImage(videoObj, 0, 0, canvas.width, canvas.height);
-            func(canvas.toDataURL("image/png"));
-        }
-        return this;
+  function notify(target, error, kind) {
+    const messages = {
+      NotFoundError:
+        "未检测到可用的" +
+        (kind === "audio" ? "麦克风" : "摄像头或麦克风") +
+        "，请连接设备后重试。",
+      DevicesNotFoundError: "未检测到媒体设备，请连接设备后重试。",
+      NotAllowedError:
+        "媒体访问被拒绝，请在浏览器的网站权限中允许摄像头或麦克风，然后重试。",
+      PermissionDeniedError: "媒体访问被拒绝，请检查浏览器的网站权限。",
+      NotReadableError:
+        "设备无法读取，可能正被其他程序占用，请关闭占用程序后重试。",
+      TrackStartError: "设备无法启动，可能正被其他程序占用。",
+      OverconstrainedError:
+        "当前设备不支持所选参数，请切换设备或降低分辨率后重试。",
+      SecurityError: "浏览器阻止了媒体访问，请使用 HTTPS 并检查网站权限。",
     };
-
-    //audio Functions
-    $.fn.audio = function(opt) {
-        if (opt === 'enum') {
-            const callback = arguments[1], target = this[0];
-            if (!available(target, 'audio')) { if (typeof callback === 'function') callback([]); return this; }
-            navigator.mediaDevices.enumerateDevices().then(devices => {
-                if (typeof callback === 'function') callback(devices.filter(device => device.kind === 'audioinput'));
-            }).catch(error => { notify(target, error, 'audio'); if (typeof callback === 'function') callback([]); });
-            return this;
-        }
-        let canvasObj, audioObj, func_show, dataArray;
-        let para = {},
-            mainObj = this,
-            constraints = {audio:default_constraints.audio, video:false},
-            effect_func = [effect_1, effect_2, effect_3];
-        if(this.data('audio')===undefined) {
-            canvasObj = this.get(0);
-            audioObj = this.get(0);
-            let tagName = canvasObj.tagName.toLowerCase();
-            if(tagName === 'audio') {
-                canvasObj = document.createElement('canvas');
-                $(canvasObj).insertAfter(audioObj).css({width:'100%',height:100});
-            } else {
-                if(tagName !== 'canvas') {
-                    canvasObj = document.createElement('canvas');
-                    $(canvasObj).insertAfter(audioObj).css({width:'100%',height:100});
-                    this.append(canvasObj)
-                }
-                audioObj = new Audio();
-            }
-            this.data('canvas', canvasObj);
-            this.data('audio', audioObj);
-            this.data('stop', 'n');
-            try { init_audio(); init_canvas(); }
-            catch (error) { this.removeData('audio'); notify(this[0], error, 'audio'); return this; }
-            mainObj.data('para', para);
-        } else {
-            canvasObj = this.data('canvas');
-            audioObj = this.data('audio');
-            para = this.data('para');
-        }
-        // 初始化变量
-        dataArray = new Uint8Array(para.audioAnalyser.frequencyBinCount);
-
-        if(typeof arguments[1] === 'undefined') {
-            arguments[1] = function(){return true;};
-        }
-        if(typeof(opt)==='string') {
-            switch(opt) {
-                case 'enum':
-                    enumerate(arguments[1]);
-                    break;
-                case 'record':
-                    return record(arguments[1], arguments[2]);
-            }
-        } else if(typeof(opt)==='object') {
-            Object.keys(default_constraints.audio).forEach((key) => {
-                if(typeof opt[key]!=='undefined')  {
-                    constraints.audio[key] = opt[key];
-                }
-            });
-            if(typeof opt.deviceId !== 'undefined') {
-                constraints.audio = {deviceId: opt.deviceId};
-            }
-            if(typeof opt.file !== 'undefined') {
-                musicWave();
-            } else {
-                soundWave();
-            }
-        }
-
-        function init_canvas() {
-            para.canvasCtx = canvasObj.getContext("2d");
-            para.canvasWidth = canvasObj.offsetWidth;
-            para.canvasHeight = canvasObj.offsetHeight;
-            para.gradient = para.canvasCtx.createLinearGradient(0, 0, para.canvasWidth/3, para.canvasHeight);
-            para.gradient.addColorStop(0, "#f500d8");
-            para.gradient.addColorStop(1, "#ceaf11");
-            $(window).resize(function(){
-                para.gradient = para.canvasCtx.createLinearGradient(0, 0, para.canvasWidth/3, para.canvasHeight);
-                para.gradient.addColorStop(0, "#f500d8");
-                para.gradient.addColorStop(1, "#ceaf11");
-                para.canvasWidth = canvasObj.offsetWidth;
-                para.canvasHeight = canvasObj.offsetHeight;
-            });
-        }
-
-        function init_audio() {
-            // 创建音频对象
-            para.audioContext = new (window.AudioContext || window.webkitAudioContext || window.mozAudioContext)();
-            // 获取声音源
-            para.audioSource = para.audioContext.createBufferSource();
-            // 获取分析对象
-            para.audioAnalyser = para.audioContext.createAnalyser();
-            para.audioAnalyser.minDecibels = -90;
-            para.audioAnalyser.maxDecibels = -10;
-            para.audioAnalyser.smoothingTimeConstant = 0.85;
-            para.audioAnalyser.fftSize = 1024;
-            // 音频处理对象
-            para.processor = para.audioContext.createScriptProcessor(1024);
-            para.processor.connect(para.audioContext.destination);
-            para.audioAnalyser.connect(para.processor);
-            // 获取其他对象
-            para.waveShaper = para.audioContext.createWaveShaper();
-            para.biquadFilter = para.audioContext.createBiquadFilter();
-            para.convolver = para.audioContext.createConvolver();
-            para.gainNode = para.audioContext.createGain();
-            //para.gainNode.gain.value = 0;
-        }
-
-        function enumerate(func) {
-            if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
-                navigator.mediaDevices.enumerateDevices()
-                    .then(function(devices){
-                        let result = {};
-                        devices.forEach(function(device) {
-                            if(device.kind.toLowerCase() === 'audioinput') result.push(device);
-                        });
-                        func(result);
-                    })
-                    .catch(function(err) {
-                        new Error(err.name + ": " + err.message)
-                    });
-            }
-        }
-
-        function musicWave() {
-            let sound;
-            let loadAudioElement = function(url) {
-                return new Promise(function(resolve, reject) {
-                    audioObj.addEventListener('canplay', function() {
-                        resolve(audioObj);
-                    });
-                    audioObj.addEventListener('play', function() {
-                        mainObj.data('stop', 'y');
-                        setTimeout(function(){
-                            if(typeof opt.func === 'function') {
-                                func_show = opt.func;
-                            } else {
-                                func_show = effect_func[parseInt(3 * Math.random())];
-                            }
-                            mainObj.data('stop', 'n');
-                            show();
-                        }, 100);
-                    });
-                    audioObj.addEventListener('error', reject);
-                    audioObj.autoplay = true;
-                    audioObj.controls = true;
-                    audioObj.src = url;
-                    audioObj.onpause = function(){
-                        soundWave();
-                    }
-
-                });
-            }
-            loadAudioElement(opt.file).then(function(obj) {
-                if(typeof para.audioContext === 'undefined') return;
-                sound = sound || para.audioContext.createMediaElementSource(obj);
-                obj.onended = function() {
-                    sound.disconnect(para.audioAnalyser);
-                    sound.disconnect(para.audioContext.destination);
-                    sound = null;
-                    para.processor.onaudioprocess = function() {};
-                    para.processor.disconnect();
-                    para.canvasCtx.clearRect(0, 0, para.canvasWidth, para.canvasHeight);
-                    mainObj.data('stop', 'y');
-                };
-                sound.connect(para.audioAnalyser);
-                sound.connect(para.audioContext.destination);
-                para.processor.onaudioprocess = function(e) {
-                    para.audioAnalyser.getByteTimeDomainData(dataArray);
-                };
-            }).catch(function(e) {
-                notify(mainObj[0], new Error('音频文件无法播放，请重新选择音乐或检查文件是否存在。'), 'audio');
-            });
-        }
-
-        function soundWave() {
-            if (!available(mainObj[0], 'audio')) return;
-            navigator.mediaDevices.getUserMedia(constraints)
-                .then(function(stream) {
-                    if(typeof para.audioContext === 'undefined') return;
-                    para.audioContext.resume().then(() => {
-                        let source = para.audioContext.createMediaStreamSource(stream);
-                        source.connect(para.waveShaper);
-                        para.waveShaper.connect(para.biquadFilter);
-                        para.biquadFilter.connect(para.gainNode);
-                        para.convolver.connect(para.gainNode);
-                        para.gainNode.connect(para.audioAnalyser);
-                        para.audioAnalyser.connect(para.audioContext.destination);
-
-                        para.waveShaper.oversample = '4x';
-                        para.biquadFilter.gain.setTargetAtTime(0, para.audioContext.currentTime, 0)
-
-                        mainObj.data('stop', 'y');
-                        setTimeout(function(){
-                            if(typeof opt.func === 'function') {
-                                func_show = opt.func;
-                            } else {
-                                func_show = effect_func[parseInt(3 * Math.random())];
-                            }
-                            mainObj.data('stop', 'n');
-                            show();
-                        }, 100);
-                    });
-                }).catch(function(err) {
-                    notify(mainObj[0], err, 'audio');
-                });
-        }
-
-        function show() {
-            if(mainObj.data('stop')==='y') return;
-            requestAnimationFrame(show);
-            if(typeof para.audioAnalyser === 'undefined') return;
-            para.audioAnalyser.getByteFrequencyData(dataArray);
-            para.canvasCtx.clearRect(0, 0, para.canvasWidth, para.canvasHeight);
-            para.canvasCtx.fillStyle = 'rgb(240,240,240)';
-            para.canvasCtx.fillRect(0, 0, para.canvasWidth, para.canvasHeight);
-            func_show(dataArray, para.canvasCtx, para.canvasWidth, para.canvasHeight);
-        }
-
-        function record(func, format) {
-            if (!available(mainObj[0], 'audio')) return false;
-            if (!window.MediaRecorder) { notify(mainObj[0], new Error('当前浏览器不支持录音。'), 'audio'); return false; }
-            if (mainObj.data('recordingPending')) { notify(mainObj[0], new Error('正在等待麦克风权限，请先完成浏览器权限选择。'), 'audio'); return true; }
-            let mediaRecorder = mainObj.data('mediaRecorder');
-            if(mediaRecorder==null) {
-                mainObj.data('recordingPending', true);
-                navigator.mediaDevices.getUserMedia(constraints)
-                    .then(function(stream) {
-                        mainObj.removeData('recordingPending');
-                        clearNotice(mainObj[0], 'audio');
-                        let audioType = ['audio/webm', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
-                        mediaRecorder = new MediaRecorder(stream, audioType ? {mimeType: audioType} : undefined);
-                        mediaRecorder.ondataavailable = function (e) {
-                            let chunks = e.data;
-                            if(chunks.size<500) return;
-                            if(format===undefined) {
-                                if(typeof func === 'function') func(chunks);
-                                mainObj.data('mediaRecorder', null);
-                            } else {
-                                const fileReader = new FileReader();
-                                fileReader.onload = function(e) {
-                                    para.audioContext.decodeAudioData(e.target.result, (audioBuffer) => {
-                                        let blob = buffer2wav(audioBuffer, format==='mp3');
-                                        if(typeof func === 'function') func(blob);
-                                        mainObj.data('mediaRecorder', null);
-                                    })
-                                }
-                                fileReader.readAsArrayBuffer(chunks);
-                            }
-                        }
-                        mediaRecorder.onstop = function() { stream.getTracks().forEach(track => track.stop()); };
-                        mediaRecorder.start();
-                        mainObj.data('mediaRecorder', mediaRecorder);
-                    }).catch(function(err) {
-                        mainObj.removeData('recordingPending');
-                        notify(mainObj[0], err, 'audio');
-                    });
-                return true;
-            } else {
-                mediaRecorder.stop();
-                return false;
-            }
-        }
-
-        function effect_1(data, canvas, width, height) { //音柱
-            let length = data.length;
-            let barWidth = 10;
-            let barHeight;
-            let x = 0;
-            for(let i = 0; i < length; i++) {
-                barHeight = data[i]/256 * height * 1.3;
-                canvas.fillStyle = 'rgb(' + (barHeight+150) + ',50,50)';
-                canvas.fillRect(x,height-barHeight,barWidth,barHeight);
-                x += barWidth + 1;
-            }
-        }
-
-        function effect_2(data, canvas, width, height) { //音波
-            let length = data.length;
-            let step = width / length;
-            let x = 0;
-            canvas.beginPath();
-            canvas.moveTo(0, height);
-            for (let i = 0; i < length; i++) {
-                canvas.lineTo(x, height - data[i]/256 * height);
-                x += step;
-            }
-            canvas.fillStyle = para.gradient;
-            canvas.fill();
-            canvas.closePath();
-
-            canvas.beginPath();
-            canvas.moveTo(0, height);
-            x = 0;
-            for (let i = 0; i < length; i++) {
-                canvas.lineTo(x, height - data[i]/256 * height - Math.random() * 30)
-                x += step;
-            }
-            canvas.strokeStyle = para.gradient;
-            canvas.stroke();
-            canvas.closePath();
-        }
-
-        function effect_3(data, canvas, width, height) { //横条
-            let length = data.length;
-            let barLength = 0;
-            let tmp = 0;
-            for(let i = 0; i < length; i++) {
-                if(data[i]<tmp) break;
-                tmp = data[i]
-            }
-            barLength = width * Math.pow((tmp / 256), 2) * 0.7;
-            canvas.fillStyle = 'rgb(' + (barLength+50) + ',50,50)';
-            canvas.fillRect(0,0,barLength,height);
-        }
-
-        // 将 webm 格式的浏览器音频转码为 wav
-        function buffer2wav(aBuffer, mp3) {
-            let numOfChan = aBuffer.numberOfChannels,
-                btwLength = aBuffer.length * numOfChan * 2 + 44,
-                btwArrBuff = new ArrayBuffer(btwLength),
-                btwView = new DataView(btwArrBuff),
-                btwChnls = [],
-                btwIndex,
-                btwSample,
-                btwOffset = 0,
-                btwPos = 0;
-            setUint32(0x46464952); // "RIFF"
-            setUint32(btwLength - 8); // file length - 8
-            setUint32(0x45564157); // "WAVE"
-            setUint32(0x20746d66); // "fmt " chunk
-            setUint32(16); // length = 16
-            setUint16(1); // PCM (uncompressed)
-            setUint16(numOfChan);
-            setUint32(aBuffer.sampleRate);
-            setUint32(aBuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-            setUint16(numOfChan * 2); // block-align
-            setUint16(16); // 16-bit
-            setUint32(0x61746164); // "data" - chunk
-            setUint32(btwLength - btwPos - 4); // chunk length
-
-            function setUint16(data) {
-                btwView.setUint16(btwPos, data, true);
-                btwPos += 2;
-            }
-
-            function setUint32(data) {
-                btwView.setUint32(btwPos, data, true);
-                btwPos += 4;
-            }
-
-            for (btwIndex = 0; btwIndex < aBuffer.numberOfChannels; btwIndex++)
-                btwChnls.push(aBuffer.getChannelData(btwIndex));
-
-            while (btwPos < btwLength) {
-                for (btwIndex = 0; btwIndex < numOfChan; btwIndex++) {
-                    // interleave btwChnls
-                    btwSample = Math.max(-1, Math.min(1, btwChnls[btwIndex][btwOffset])); // clamp
-                    btwSample = (0.5 + btwSample < 0 ? btwSample * 32768 : btwSample * 32767) | 0; // scale to 16-bit signed int
-                    btwView.setInt16(btwPos, btwSample, true); // write 16-bit sample
-                    btwPos += 2;
-                }
-                btwOffset++; // next source sample
-            }
-
-            let wavHdr = lamejs.WavHeader.readHeader(new DataView(btwArrBuff));
-            let wavSamples = new Int16Array(btwArrBuff, wavHdr.dataOffset, wavHdr.dataLen / 2);
-
-            return mp3 ? wav2mp3(wavHdr.channels, wavHdr.sampleRate, wavSamples) : new Blob([btwArrBuff], {type: "audio/wav"});
-        }
-
-        // 将 wav 编码转换为 mp3（需要 lamejs 支持）
-        function wav2mp3(channels, sampleRate, samples) {
-            let buffer = [];
-            let mp3enc = new lamejs.Mp3Encoder(channels, sampleRate, 128);
-            let remaining = samples.length;
-            let samplesPerFrame = 1152;
-            for (let i = 0; remaining >= samplesPerFrame; i += samplesPerFrame) {
-                let mono = samples.subarray(i, i + samplesPerFrame);
-                let mp3buf = mp3enc.encodeBuffer(mono);
-                if (mp3buf.length > 0) {
-                    buffer.push(new Int8Array(mp3buf));
-                }
-                remaining -= samplesPerFrame;
-            }
-            let d = mp3enc.flush();
-            if(d.length > 0){
-                buffer.push(new Int8Array(d));
-            }
-            return new Blob(buffer, {type: 'audio/mp3'});
-        }
-
+    const message =
+      messages[error.name] ||
+      error.message ||
+      "媒体设备调用失败，请检查设备连接及浏览器权限。";
+    const obj = $(target),
+      id = kind === "audio" ? "audio" : "camera";
+    let notice = obj.data("mediaNotice-" + id);
+    if (!notice || !notice[0].isConnected) {
+      notice = $(
+        '<div role="alert" class="alert alert-warning my-2 media-notice">',
+      ).css({ textAlign: "left", fontSize: 14 });
+      obj.after(notice);
+      obj.data("mediaNotice-" + id, notice);
+    }
+    notice.text(message).show();
+    obj.trigger("media:error", [
+      { message, name: error.name || "Error", kind: id, error },
+    ]);
+  }
+  function available(target, kind) {
+    if (!window.isSecureContext) {
+      notify(
+        target,
+        new Error("媒体设备需要 HTTPS；本机也可通过 localhost 访问。"),
+        kind,
+      );
+      return false;
+    }
+    if (
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== "function"
+    ) {
+      notify(
+        target,
+        new Error(
+          "当前浏览器不支持媒体设备调用，请使用支持摄像头/麦克风的浏览器。",
+        ),
+        kind,
+      );
+      return false;
+    }
+    return true;
+  }
+  function clearNotice(target, kind) {
+    const notice = $(target).data("mediaNotice-" + kind);
+    if (notice) notice.hide();
+  }
+  function safePlay(media) {
+    const promise = media.play();
+    if (promise) promise.catch(function () {});
+  }
+  // Video Functions
+  $.fn.camera = function (command, callback) {
+    if (command === "setting" || command === "constraints")
+      return JSON.parse(JSON.stringify(default_constraints));
+    if (command === "e" || command === "enum") {
+      const target = this[0];
+      if (!target) return this;
+      if (
+        !available(target, "camera") ||
+        !navigator.mediaDevices.enumerateDevices
+      ) {
+        if (typeof callback === "function") callback({});
         return this;
+      }
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devices) => {
+          const result = {};
+          devices.forEach((device) =>
+            (result[device.kind] || (result[device.kind] = [])).push(device),
+          );
+          if (!result.videoinput?.length)
+            notify(
+              target,
+              new DOMException("未发现摄像头", "NotFoundError"),
+              "camera",
+            );
+          if (typeof callback === "function") callback(result);
+        })
+        .catch((error) => {
+          notify(target, error, "camera");
+          if (typeof callback === "function") callback({});
+        });
+      return this;
+    }
+    let recording = false;
+    this.each(function () {
+      const video = this,
+        $video = $(video);
+      let state = $video.data("cameraState");
+      if (!state) {
+        state = {
+          ns: ".mediaCamera" + ++mediaSerial,
+          generation: 0,
+          constraints: $.extend(true, {}, default_constraints),
+          style: video.getAttribute("style"),
+          timer: null,
+        };
+        $video.data("cameraState", state);
+      }
+      function stopRecording() {
+        const recorder = $video.data("recorder");
+        if (recorder && recorder.state !== "inactive") recorder.stop();
+        $video.data("recorder", null);
+        $(document).off(state.ns);
+        $video.off(state.ns);
+      }
+      function close(noise) {
+        state.generation++;
+        $video.removeData("cameraRequest");
+        stopRecording();
+        const stream = $video.data("stream");
+        if (stream) stream.getTracks().forEach((track) => track.stop());
+        $video.data("stream", null);
+        video.onloadedmetadata = null;
+        if (video.srcObject) {
+          video.pause();
+          video.srcObject = null;
+          if (noise) {
+            video.loop = true;
+            video.src = "noise.mp4";
+            video.load();
+            safePlay(video);
+          }
+        }
+      }
+      if (command === "destroy") {
+        close(false);
+        if (state.style === null) video.removeAttribute("style");
+        else video.setAttribute("style", state.style);
+        $video.removeData("cameraState cameraConstraints");
+        const notice = $video.data("mediaNotice-camera");
+        if (notice) notice.remove();
+        $video.removeData("mediaNotice-camera");
+        return;
+      }
+      if (command === "c" || command === "close" || command === "stop") {
+        close(true);
+        if (typeof callback === "function") callback();
+        return;
+      }
+      if (command === "n" || command === "snap") {
+        if (video.readyState < 2 || !video.videoWidth) {
+          notify(
+            video,
+            new Error("摄像头画面尚未就绪，请先开启摄像头后再截图。"),
+            "camera",
+          );
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = $video.width() || video.videoWidth;
+        canvas.height = $video.height() || video.videoHeight;
+        canvas
+          .getContext("2d")
+          .drawImage(video, 0, 0, canvas.width, canvas.height);
+        if (typeof callback === "function")
+          callback(canvas.toDataURL("image/png"));
+        return;
+      }
+      if (command === "r" || command === "record") {
+        const stream = $video.data("stream");
+        if (
+          !stream ||
+          !stream.getVideoTracks().some((track) => track.readyState === "live")
+        ) {
+          notify(
+            video,
+            new Error("摄像头尚未开启或已断开，请先开启摄像头。"),
+            "camera",
+          );
+          return;
+        }
+        try {
+          if (!window.MediaRecorder) throw new Error("当前浏览器不支持录像。");
+          if ($video.data("recorder")) {
+            stopRecording();
+            return;
+          }
+          const type = [
+            "video/mp4",
+            "video/webm;codecs=vp8,opus",
+            "video/webm",
+          ].find((type) => MediaRecorder.isTypeSupported(type));
+          const recorder = new MediaRecorder(
+            stream,
+            type ? { mimeType: type } : undefined,
+          );
+          let wasFullscreen = false;
+          recorder.ondataavailable = (event) => {
+            if (typeof callback === "function") callback(event);
+          };
+          recorder.onstop = () => {
+            if ($video.data("recorder") === recorder)
+              $video.data("recorder", null);
+            $(document).off(state.ns);
+            $video.off(state.ns);
+          };
+          $video.data("recorder", recorder);
+          recorder.start();
+          recording = true;
+          $(document).on("fullscreenchange" + state.ns, () => {
+            if (document.fullscreenElement === video) wasFullscreen = true;
+            else if (wasFullscreen) stopRecording();
+          });
+          $video.on("pause" + state.ns, () => {
+            if (document.fullscreenElement === video) $video.fullscreen("e");
+          });
+          $video.fullscreen("r");
+        } catch (error) {
+          notify(video, error, "camera");
+        }
+        return;
+      }
+      if (typeof command === "object")
+        state.constraints = $.extend(true, {}, default_constraints, command);
+      close(false);
+      const constraints = $.extend(true, {}, state.constraints),
+        id = state.generation;
+      if (!available(video, "camera")) return;
+      if (constraints.mirror) $video.css("transform", "rotateY(180deg)");
+      else if (state.style === null) video.style.removeProperty("transform");
+      video.volume = 0;
+      clearNotice(video, "camera");
+      $video.data("cameraRequest", id);
+      navigator.mediaDevices
+        .getUserMedia(constraints)
+        .then((stream) => {
+          if (id !== state.generation) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          if (constraints.video !== false && !stream.getVideoTracks().length) {
+            stream.getTracks().forEach((track) => track.stop());
+            throw new DOMException("未检测到可用摄像头", "NotFoundError");
+          }
+          $video.removeData("cameraRequest");
+          video.onloadedmetadata = (event) => {
+            if (id !== state.generation) return;
+            if (typeof callback === "function") callback(event);
+            safePlay(video);
+            $video.trigger("media:ready");
+          };
+          video.srcObject = stream;
+          video.muted = true;
+          video.setAttribute("playsinline", "");
+          $video.data("stream", stream).data("recorder", null);
+          clearNotice(video, "camera");
+          safePlay(video);
+        })
+        .catch((error) => {
+          if (id === state.generation) {
+            $video.removeData("cameraRequest");
+            notify(video, error, "camera");
+          }
+        });
+    });
+    return command === "r" || command === "record" ? recording : this;
+  };
+
+  //audio Functions
+  $.fn.audio = function (opt) {
+    if (this.length > 1) {
+      const args = arguments;
+      this.each(function () {
+        $.fn.audio.apply($(this), args);
+      });
+      return this;
+    }
+    if (!this.length) return this;
+    if (["stop", "close", "destroy"].includes(opt)) {
+      const para = this.data("para");
+      if (para) {
+        para.disposed = opt === "destroy";
+        if (para.cleanup) para.cleanup();
+        para.recordGeneration = (para.recordGeneration || 0) + 1;
+        this.removeData("recordingPending");
+        const recorder = this.data("mediaRecorder");
+        if (recorder && recorder.state !== "inactive") recorder.stop();
+        this.data("mediaRecorder", null);
+        if (opt === "destroy") {
+          $(window).off(para.ns);
+          $(document).off(para.ns);
+          if (para.audioContext) para.audioContext.close().catch(() => {});
+          if (para.ownedCanvas) $(this.data("canvas")).remove();
+          this.removeData("audio canvas para stop");
+        }
+      }
+      return this;
+    }
+    if (opt === "enum") {
+      const callback = arguments[1],
+        target = this[0];
+      if (!available(target, "audio")) {
+        if (typeof callback === "function") callback([]);
+        return this;
+      }
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devices) => {
+          if (typeof callback === "function")
+            callback(devices.filter((device) => device.kind === "audioinput"));
+        })
+        .catch((error) => {
+          notify(target, error, "audio");
+          if (typeof callback === "function") callback([]);
+        });
+      return this;
+    }
+    let canvasObj, audioObj, func_show, dataArray;
+    let para = {},
+      mainObj = this,
+      constraints = {
+        audio: $.extend(true, {}, default_constraints.audio),
+        video: false,
+      },
+      effect_func = [effect_1, effect_2, effect_3];
+    if (this.data("audio") === undefined) {
+      canvasObj = this.get(0);
+      audioObj = this.get(0);
+      let tagName = canvasObj.tagName.toLowerCase();
+      if (tagName === "audio") {
+        canvasObj = document.createElement("canvas");
+        $(canvasObj).insertAfter(audioObj).css({ width: "100%", height: 100 });
+      } else {
+        if (tagName !== "canvas") {
+          canvasObj = document.createElement("canvas");
+          $(canvasObj)
+            .insertAfter(audioObj)
+            .css({ width: "100%", height: 100 });
+          this.append(canvasObj);
+        }
+        audioObj = new Audio();
+      }
+      this.data("canvas", canvasObj);
+      this.data("audio", audioObj);
+      this.data("stop", "n");
+      para.ns = ".mediaAudio" + ++mediaSerial;
+      para.ownedCanvas = canvasObj !== this[0];
+      try {
+        init_audio();
+        init_canvas();
+      } catch (error) {
+        this.removeData("audio canvas");
+        if (para.ownedCanvas) $(canvasObj).remove();
+        if (para.audioContext) para.audioContext.close().catch(() => {});
+        notify(this[0], error, "audio");
+        return this;
+      }
+      mainObj.data("para", para);
+      $(window).on("pagehide" + para.ns, () => mainObj.audio("stop"));
+    } else {
+      canvasObj = this.data("canvas");
+      audioObj = this.data("audio");
+      para = this.data("para");
+    }
+    para.cleanup = () => {
+      para.waveGeneration = (para.waveGeneration || 0) + 1;
+      mainObj.data("stop", "y");
+      cancelAnimationFrame(para.frame);
+      clearTimeout(para.waveTimer);
+      if (para.waveStream) {
+        para.waveStream.getTracks().forEach((track) => track.stop());
+        para.waveStream = null;
+      }
+      if (para.waveSource) {
+        para.waveSource.disconnect();
+        para.waveSource = null;
+      }
+      if (para.mediaElementSource) para.mediaElementSource.disconnect();
+      if (para.audioHandlers) para.audioHandlers();
+      audioObj.onpause = audioObj.onended = null;
+      audioObj.pause();
+    };
+    // 初始化变量
+    dataArray = new Uint8Array(para.audioAnalyser.frequencyBinCount);
+
+    if (typeof arguments[1] === "undefined") {
+      arguments[1] = function () {
+        return true;
+      };
+    }
+    if (typeof opt === "string") {
+      switch (opt) {
+        case "enum":
+          enumerate(arguments[1]);
+          break;
+        case "record":
+          return record(arguments[1], arguments[2]);
+      }
+    } else if (typeof opt === "object") {
+      Object.keys(default_constraints.audio).forEach((key) => {
+        if (typeof opt[key] !== "undefined") {
+          constraints.audio[key] = opt[key];
+        }
+      });
+      if (typeof opt.deviceId !== "undefined") {
+        constraints.audio = { deviceId: opt.deviceId };
+      }
+      if (typeof opt.file !== "undefined") {
+        musicWave();
+      } else {
+        soundWave();
+      }
     }
 
-    // Fullscreen Functions
-    $.fn.fullscreen = function(opt) {
-        let isFullscreen = document.fullscreenEnabled || document.webkitFullscreenEnabled || document.msFullscreenEnabled || document.mozFullScreenEnabled;
-        if(!isFullscreen) return false;
-        let theObj = this.get(0);
-        if(typeof opt === 'function') {
-            arguments[1] = opt;
-            opt = undefined;
-        }
-        if(typeof opt === 'undefined') {
-            opt = check() ? 'exit' : 'run';
-        }
-        if(typeof arguments[1] !== 'function') {
-            arguments[1] = function(){return true;};
-        }
-        let func = arguments[1];
-        switch(opt) {
-            case 'r':
-            case 'run':
-                run(func);
-                break;
-            case 'e':
-            case 'exit':
-                exit(func);
-                break;
-            case 'c':
-            case 'check':
-                return check();
-            default:
-                return getElement();
-        }
-
-        function run(callback) {
-            if(check()) exit();
-            if(theObj.requestFullscreen) {
-                theObj.requestFullscreen();
-            } else if(theObj.mozRequestFullScreen) {
-                theObj.mozRequestFullScreen();
-            } else if(theObj.msRequestFullscreen) {
-                theObj.msRequestFullscreen();
-            } else if(theObj.oRequestFullscreen) {
-                theObj.oRequestFullscreen();
-            } else if(theObj.webkitRequestFullscreen) {
-                theObj.webkitRequestFullScreen();
-            }else{
-                let css = {
-                    position:'absolute',
-                    top:0,
-                    left:0,
-                    width:'100%',
-                    height:'100%',
-                    overflow:'hidden'
-                };
-                $(document.documentElement).css(css);
-                $(document.body).css(css);
-                $(theObj).css(css).addClass('m-0 p-0');
-                document.fullscreenElement = theObj;
-                $(window).one('keydown', function(e){
-                    if(e.keyCode===27) {
-                        $(theObj).fullscreen('exit');
-                    }
-                });
-            }
-            $(theObj).data('fullscreen', 'y');
-            if(typeof callback === 'function') callback();
-        }
-        function exit(callback) {
-            if(!check()) return;
-            if (document.exitFullscreen) {
-                document.exitFullscreen();
-            } else if (document.msExitFullscreen) {
-                document.msExitFullscreen();
-            } else if (document.mozCancelFullScreen) {
-                document.mozCancelFullScreen();
-            } else if(document.oRequestFullscreen) {
-                document.oCancelFullScreen();
-            }else if (document.webkitExitFullscreen) {
-                document.webkitExitFullscreen();
-            }else{
-                let  css = {
-                    position:'static',
-                    top:'auto',
-                    left:'auto',
-                    width:'auto',
-                    height:'auto',
-                    overflow:'auto',
-                };
-                $(document.documentElement).css(css);
-                $(document.body).css(css);
-                $(theObj).css(css).addClass('m-0 p-0');
-                document.fullscreenElement = undefined;
-            }
-            $(theObj).data('fullscreen', null);
-            if(typeof callback === 'function') callback();
-        }
-        function check(){
-            let list = [document.isFullScreen, document.webkitIsFullScreen, document.msFullscreenEnabled, document.mozIsFullScreen, document.oIsFullScreen, window.fullScreen];
-            for(let x in list) {
-                if(typeof list[x] === 'boolean') return list[x];
-            }
-            return !!$(theObj).data('fullscreen');
-        }
-        function getElement(){
-            return document.fullscreenElement || document.mozFullScreenElement || document.webkitFullscreenElement;
-        }
-        return this;
+    function init_canvas() {
+      para.canvasCtx = canvasObj.getContext("2d");
+      para.canvasWidth = canvasObj.offsetWidth;
+      para.canvasHeight = canvasObj.offsetHeight;
+      canvasObj.width = Math.max(1, para.canvasWidth);
+      canvasObj.height = Math.max(1, para.canvasHeight);
+      para.gradient = para.canvasCtx.createLinearGradient(
+        0,
+        0,
+        para.canvasWidth / 3,
+        para.canvasHeight,
+      );
+      para.gradient.addColorStop(0, "#f500d8");
+      para.gradient.addColorStop(1, "#ceaf11");
+      $(window).on("resize" + para.ns, function () {
+        para.canvasWidth = canvasObj.offsetWidth;
+        para.canvasHeight = canvasObj.offsetHeight;
+        canvasObj.width = Math.max(1, para.canvasWidth);
+        canvasObj.height = Math.max(1, para.canvasHeight);
+        para.gradient = para.canvasCtx.createLinearGradient(
+          0,
+          0,
+          para.canvasWidth / 3,
+          para.canvasHeight,
+        );
+        para.gradient.addColorStop(0, "#f500d8");
+        para.gradient.addColorStop(1, "#ceaf11");
+      });
     }
+
+    function init_audio() {
+      // 创建音频对象
+      para.audioContext = new (window.AudioContext ||
+        window.webkitAudioContext ||
+        window.mozAudioContext)();
+      // 获取声音源
+      // 获取分析对象
+      para.audioAnalyser = para.audioContext.createAnalyser();
+      para.audioAnalyser.minDecibels = -90;
+      para.audioAnalyser.maxDecibels = -10;
+      para.audioAnalyser.smoothingTimeConstant = 0.85;
+      para.audioAnalyser.fftSize = 1024;
+      // 获取其他对象
+    }
+
+    function beginWave() {
+      para.cleanup();
+      para.disposed = false;
+      func_show =
+        typeof opt.func === "function"
+          ? opt.func
+          : effect_func[Math.floor(3 * Math.random())];
+      return para.waveGeneration;
+    }
+    function drawWave(id) {
+      if (para.disposed || id !== para.waveGeneration) return;
+      mainObj.data("stop", "n");
+      show();
+    }
+    function musicWave() {
+      const id = beginWave();
+      function broken() {
+        if (id === para.waveGeneration)
+          notify(
+            mainObj[0],
+            new Error("音频文件无法播放，请重新选择音乐或检查文件是否存在。"),
+            "audio",
+          );
+      }
+      async function ready() {
+        if (id !== para.waveGeneration || para.disposed) return;
+        try {
+          await para.audioContext.resume();
+          if (id !== para.waveGeneration || para.disposed) return;
+          if (!para.mediaElementSource)
+            para.mediaElementSource =
+              para.audioContext.createMediaElementSource(audioObj);
+          para.mediaElementSource.disconnect();
+          para.mediaElementSource.connect(para.audioAnalyser);
+          para.mediaElementSource.connect(para.audioContext.destination);
+          cancelAnimationFrame(para.frame);
+          drawWave(id);
+        } catch (error) {
+          if (id === para.waveGeneration) broken();
+        }
+      }
+      audioObj.addEventListener("play", ready);
+      audioObj.addEventListener("error", broken);
+      para.audioHandlers = () => {
+        audioObj.removeEventListener("play", ready);
+        audioObj.removeEventListener("error", broken);
+      };
+      audioObj.onpause = () => {
+        if (id === para.waveGeneration && !audioObj.ended) soundWave();
+      };
+      audioObj.onended = () => {
+        if (id === para.waveGeneration) para.cleanup();
+      };
+      audioObj.autoplay = true;
+      audioObj.controls = true;
+      audioObj.src = opt.file;
+      safePlay(audioObj);
+    }
+    function soundWave() {
+      const id = beginWave();
+      if (!available(mainObj[0], "audio")) return;
+      navigator.mediaDevices
+        .getUserMedia(constraints)
+        .then(async (stream) => {
+          if (para.disposed || id !== para.waveGeneration) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          para.waveStream = stream;
+          try {
+            await para.audioContext.resume();
+            if (para.disposed || id !== para.waveGeneration) {
+              stream.getTracks().forEach((track) => track.stop());
+              return;
+            }
+            para.waveSource = para.audioContext.createMediaStreamSource(stream);
+            para.waveSource.connect(para.audioAnalyser);
+            drawWave(id);
+          } catch (error) {
+            stream.getTracks().forEach((track) => track.stop());
+            if (id === para.waveGeneration) notify(mainObj[0], error, "audio");
+          }
+        })
+        .catch((error) => {
+          if (id === para.waveGeneration) notify(mainObj[0], error, "audio");
+        });
+    }
+
+    function show() {
+      if (mainObj.data("stop") === "y") return;
+      cancelAnimationFrame(para.frame);
+      para.frame = requestAnimationFrame(show);
+      if (typeof para.audioAnalyser === "undefined") return;
+      para.audioAnalyser.getByteFrequencyData(dataArray);
+      para.canvasCtx.clearRect(0, 0, para.canvasWidth, para.canvasHeight);
+      para.canvasCtx.fillStyle = "rgb(240,240,240)";
+      para.canvasCtx.fillRect(0, 0, para.canvasWidth, para.canvasHeight);
+      func_show(dataArray, para.canvasCtx, para.canvasWidth, para.canvasHeight);
+    }
+
+    function record(func, format) {
+      if (!available(mainObj[0], "audio")) return false;
+      if (!window.MediaRecorder) {
+        notify(mainObj[0], new Error("当前浏览器不支持录音。"), "audio");
+        return false;
+      }
+      if (mainObj.data("recordingPending")) {
+        para.recordGeneration = (para.recordGeneration || 0) + 1;
+        mainObj.removeData("recordingPending");
+        return false;
+      }
+      const active = mainObj.data("mediaRecorder");
+      if (active) {
+        if (active.state !== "inactive") active.stop();
+        return false;
+      }
+      const request = (para.recordGeneration =
+        (para.recordGeneration || 0) + 1);
+      mainObj.data("recordingPending", true);
+      navigator.mediaDevices
+        .getUserMedia(constraints)
+        .then((stream) => {
+          if (para.disposed || request !== para.recordGeneration) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          mainObj.removeData("recordingPending");
+          clearNotice(mainObj[0], "audio");
+          try {
+            const type = ["audio/webm", "audio/mp4"].find((type) =>
+              MediaRecorder.isTypeSupported(type),
+            );
+            const recorder = new MediaRecorder(
+              stream,
+              type ? { mimeType: type } : undefined,
+            );
+            recorder.ondataavailable = async (event) => {
+              if (
+                !event.data.size ||
+                para.disposed ||
+                request !== para.recordGeneration
+              )
+                return;
+              try {
+                let result = event.data;
+                if (format !== undefined) {
+                  const buffer = await event.data.arrayBuffer();
+                  const audioBuffer =
+                    await para.audioContext.decodeAudioData(buffer);
+                  if (para.disposed || request !== para.recordGeneration)
+                    return;
+                  result = buffer2wav(audioBuffer, format === "mp3");
+                }
+                if (typeof func === "function") func(result);
+              } catch (error) {
+                if (!para.disposed && request === para.recordGeneration)
+                  notify(mainObj[0], error, "audio");
+              }
+            };
+            recorder.onstop = () => {
+              stream.getTracks().forEach((track) => track.stop());
+              if (mainObj.data("mediaRecorder") === recorder)
+                mainObj.data("mediaRecorder", null);
+            };
+            recorder.onerror = (event) => {
+              stream.getTracks().forEach((track) => track.stop());
+              if (mainObj.data("mediaRecorder") === recorder)
+                mainObj.data("mediaRecorder", null);
+              if (!para.disposed)
+                notify(
+                  mainObj[0],
+                  event.error || new Error("录音失败，请重试。"),
+                  "audio",
+                );
+            };
+            mainObj.data("mediaRecorder", recorder);
+            recorder.start();
+          } catch (error) {
+            stream.getTracks().forEach((track) => track.stop());
+            mainObj.data("mediaRecorder", null);
+            throw error;
+          }
+        })
+        .catch((error) => {
+          if (!para.disposed && request === para.recordGeneration) {
+            mainObj.removeData("recordingPending");
+            notify(mainObj[0], error, "audio");
+          }
+        });
+      return true;
+    }
+
+    function effect_1(data, canvas, width, height) {
+      //音柱
+      let length = data.length;
+      let barWidth = 10;
+      let barHeight;
+      let x = 0;
+      for (let i = 0; i < length; i++) {
+        barHeight = (data[i] / 256) * height * 1.3;
+        canvas.fillStyle = "rgb(" + (barHeight + 150) + ",50,50)";
+        canvas.fillRect(x, height - barHeight, barWidth, barHeight);
+        x += barWidth + 1;
+      }
+    }
+
+    function effect_2(data, canvas, width, height) {
+      //音波
+      let length = data.length;
+      let step = width / length;
+      let x = 0;
+      canvas.beginPath();
+      canvas.moveTo(0, height);
+      for (let i = 0; i < length; i++) {
+        canvas.lineTo(x, height - (data[i] / 256) * height);
+        x += step;
+      }
+      canvas.fillStyle = para.gradient;
+      canvas.fill();
+      canvas.closePath();
+
+      canvas.beginPath();
+      canvas.moveTo(0, height);
+      x = 0;
+      for (let i = 0; i < length; i++) {
+        canvas.lineTo(
+          x,
+          height - (data[i] / 256) * height - Math.random() * 30,
+        );
+        x += step;
+      }
+      canvas.strokeStyle = para.gradient;
+      canvas.stroke();
+      canvas.closePath();
+    }
+
+    function effect_3(data, canvas, width, height) {
+      //横条
+      let length = data.length;
+      let barLength = 0;
+      let tmp = 0;
+      for (let i = 0; i < length; i++) {
+        if (data[i] < tmp) break;
+        tmp = data[i];
+      }
+      barLength = width * Math.pow(tmp / 256, 2) * 0.7;
+      canvas.fillStyle = "rgb(" + (barLength + 50) + ",50,50)";
+      canvas.fillRect(0, 0, barLength, height);
+    }
+
+    // 将 webm 格式的浏览器音频转码为 wav
+    function buffer2wav(aBuffer, mp3) {
+      let numOfChan = aBuffer.numberOfChannels,
+        btwLength = aBuffer.length * numOfChan * 2 + 44,
+        btwArrBuff = new ArrayBuffer(btwLength),
+        btwView = new DataView(btwArrBuff),
+        btwChnls = [],
+        btwIndex,
+        btwSample,
+        btwOffset = 0,
+        btwPos = 0;
+      setUint32(0x46464952); // "RIFF"
+      setUint32(btwLength - 8); // file length - 8
+      setUint32(0x45564157); // "WAVE"
+      setUint32(0x20746d66); // "fmt " chunk
+      setUint32(16); // length = 16
+      setUint16(1); // PCM (uncompressed)
+      setUint16(numOfChan);
+      setUint32(aBuffer.sampleRate);
+      setUint32(aBuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+      setUint16(numOfChan * 2); // block-align
+      setUint16(16); // 16-bit
+      setUint32(0x61746164); // "data" - chunk
+      setUint32(btwLength - btwPos - 4); // chunk length
+
+      function setUint16(data) {
+        btwView.setUint16(btwPos, data, true);
+        btwPos += 2;
+      }
+
+      function setUint32(data) {
+        btwView.setUint32(btwPos, data, true);
+        btwPos += 4;
+      }
+
+      for (btwIndex = 0; btwIndex < aBuffer.numberOfChannels; btwIndex++)
+        btwChnls.push(aBuffer.getChannelData(btwIndex));
+
+      while (btwPos < btwLength) {
+        for (btwIndex = 0; btwIndex < numOfChan; btwIndex++) {
+          // interleave btwChnls
+          btwSample = Math.max(-1, Math.min(1, btwChnls[btwIndex][btwOffset])); // clamp
+          btwSample =
+            (0.5 + btwSample < 0 ? btwSample * 32768 : btwSample * 32767) | 0; // scale to 16-bit signed int
+          btwView.setInt16(btwPos, btwSample, true); // write 16-bit sample
+          btwPos += 2;
+        }
+        btwOffset++; // next source sample
+      }
+
+      let wavHdr = lamejs.WavHeader.readHeader(new DataView(btwArrBuff));
+      let wavSamples = new Int16Array(
+        btwArrBuff,
+        wavHdr.dataOffset,
+        wavHdr.dataLen / 2,
+      );
+
+      return mp3
+        ? wav2mp3(wavHdr.channels, wavHdr.sampleRate, wavSamples)
+        : new Blob([btwArrBuff], { type: "audio/wav" });
+    }
+
+    // 将 wav 编码转换为 mp3（需要 lamejs 支持）
+    function wav2mp3(channels, sampleRate, samples) {
+      let buffer = [];
+      let mp3enc = new lamejs.Mp3Encoder(channels, sampleRate, 128);
+      let remaining = samples.length;
+      let samplesPerFrame = 1152;
+      for (let i = 0; remaining >= samplesPerFrame; i += samplesPerFrame) {
+        let mono = samples.subarray(i, i + samplesPerFrame);
+        let mp3buf = mp3enc.encodeBuffer(mono);
+        if (mp3buf.length > 0) {
+          buffer.push(new Int8Array(mp3buf));
+        }
+        remaining -= samplesPerFrame;
+      }
+      let d = mp3enc.flush();
+      if (d.length > 0) {
+        buffer.push(new Int8Array(d));
+      }
+      return new Blob(buffer, { type: "audio/mp3" });
+    }
+
+    return this;
+  };
+
+  // Native fullscreen uses the browser's actual element, including Escape exits.
+  $.fn.fullscreen = function (command, callback) {
+    const el = this[0];
+    if (!el) return command === "check" || command === "c" ? false : this;
+    const current = () =>
+      document.fullscreenElement || document.webkitFullscreenElement;
+    if (command === "check" || command === "c") return current() === el;
+    if (typeof command === "function") {
+      callback = command;
+      command = undefined;
+    }
+    if (command === undefined) command = current() === el ? "exit" : "run";
+    if (!["run", "r", "exit", "e"].includes(command)) return current();
+    const fn =
+      command === "exit" || command === "e"
+        ? document.exitFullscreen || document.webkitExitFullscreen
+        : el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!fn) return this;
+    try {
+      const result = fn.call(
+        command === "exit" || command === "e" ? document : el,
+      );
+      Promise.resolve(result)
+        .then(() => {
+          if (typeof callback === "function") callback();
+        })
+        .catch((error) => notify(el, error, "camera"));
+    } catch (error) {
+      notify(el, error, "camera");
+    }
+    return this;
+  };
 })(jQuery);
 
 // dataURI 转 blob
 function dataURItoBlob(dataURI) {
-    // convert base64/URLEncoded data component to raw binary data held in a string
-    let byteString;
-    if (dataURI.split(',')[0].indexOf('base64') >= 0) {
-        byteString = atob(dataURI.split(',')[1]);
-    } else {
-        byteString = unescape(dataURI.split(',')[1]);
-    }
+  // convert base64/URLEncoded data component to raw binary data held in a string
+  let byteString;
+  if (dataURI.split(",")[0].indexOf("base64") >= 0) {
+    byteString = atob(dataURI.split(",")[1]);
+  } else {
+    byteString = unescape(dataURI.split(",")[1]);
+  }
 
-    // separate out the mime component
-    const mimeString = dataURI
-        .split(',')[0]
-        .split(':')[1]
-        .split(';')[0];
+  // separate out the mime component
+  const mimeString = dataURI.split(",")[0].split(":")[1].split(";")[0];
 
-    // write the bytes of the string to a typed array
-    const ia = new Uint8Array(byteString.length);
-    for (let i = 0; i < byteString.length; i++) {
-        ia[i] = byteString.charCodeAt(i);
-    }
+  // write the bytes of the string to a typed array
+  const ia = new Uint8Array(byteString.length);
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
 
-    return new Blob([ia], { type: mimeString });
+  return new Blob([ia], { type: mimeString });
 }
 
 // blob 转 dataURI
 function BlobToDataURL(blob) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = _e => resolve(reader.result);
-        reader.onerror = _e => reject(reader.error);
-        reader.onabort = _e => reject(new Error("Read aborted"));
-        reader.readAsDataURL(blob);
-    });
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (_e) => resolve(reader.result);
+    reader.onerror = (_e) => reject(reader.error);
+    reader.onabort = (_e) => reject(new Error("Read aborted"));
+    reader.readAsDataURL(blob);
+  });
 }

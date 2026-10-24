@@ -153,3 +153,7 @@ $(obj).fullscreen(opt);
 新增无设备、权限拒绝、设备占用及空媒体流的提示与保护，支持失败后重试。摄像头与麦克风需要 HTTPS（本机 localhost 为开发例外）；MP3 编码使用本地 lamejs 1.2.1。
 
 本地预览：在仓库目录运行 `python3 -m http.server 8765`，打开 http://localhost:8765/。
+
+## 核心实现优化（2026-10-24）
+
+具体修复、接口补充和兼容说明见 [CHANGELOG.md](CHANGELOG.md)。保留原演示主体与 CSS；[回归测试](tests/README.md) 可在本地运行。
