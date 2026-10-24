@@ -13,7 +13,7 @@
 下载并复制 jquery.mediaDevice.js 到网站目录，同时也需要事先准备好 jQuery 框架。
 
 ```html
-<script type="text/javascript" src="https://cdn.bootcdn.net/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script type="text/javascript" src="vendor/jquery-4.0.0.min.js"></script>
 <script type="text/javascript" src="/path/to/jquery.mediaDevice.js"></script>
 ```
 
@@ -146,3 +146,10 @@ $(obj).fullscreen(opt);
 - **check**：检测全屏状态
 - **留空**：切换全屏状态
 - **其他**：返回当前全屏对象
+## 2026-10-24 更新
+
+保留原 jQuery 插件接口与样例主体，示例使用本地 jQuery 4.0.0、Bootstrap 5.3.8。`vendor/original-theme.css` 维持原示例的布局外观；上游许可证随依赖保留。
+
+新增无设备、权限拒绝、设备占用及空媒体流的提示与保护，支持失败后重试。摄像头与麦克风需要 HTTPS（本机 localhost 为开发例外）；MP3 编码使用本地 lamejs 1.2.1。
+
+本地预览：在仓库目录运行 `python3 -m http.server 8765`，打开 http://localhost:8765/。

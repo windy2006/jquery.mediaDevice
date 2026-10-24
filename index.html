@@ -5,7 +5,8 @@
 	<title>视频设备调用及影音录制</title>
 	<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
 	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-	<link href="https://lf6-cdn-tos.bytecdntp.com/cdn/expire-1-M/bootstrap/4.5.3/css/bootstrap.min.css" rel="stylesheet">
+	<link href="vendor/bootstrap-5.3.8.min.css" rel="stylesheet">
+<link href="vendor/original-theme.css" rel="stylesheet">
 </head>
 <body class="p-3">
 <div class="container-fluid">
@@ -64,11 +65,15 @@
 	</div>
 </div>
 </body>
-<script type="text/javascript" src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/jquery/3.5.1/jquery.min.js"></script>
-<script type="text/javascript" src="https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/lamejs/1.2.1/lame.min.js"></script>
-<script type="text/javascript" src="jquery.mediaDevice.js"></script>
+<script type="text/javascript" src="vendor/jquery-4.0.0.min.js"></script>
+<script type="text/javascript" src="vendor/lame-1.2.1.min.js"></script>
+<script type="text/javascript" src="jquery.mediaDevice.js?v=20261024-media-errors"></script>
 <script type="text/javascript">
-	$(function(){
+	$('#video,#audio').on('media:error', function(event, detail) {
+        if (detail.kind === 'camera') { $('#btn_switch').text('开启'); $('#btn_record_video').text('录像'); }
+        else $('#btn_record_audio').text('录音');
+    });
+    $(function(){
 		let video_obj = $('video');
 		setTimeout(function(){
 			try {
@@ -102,10 +107,10 @@
 					$('#list_audio').prop('selectedIndex', 1);
 				}
 			}
-			$('#btn_switch').click();
+			if ((device_list.videoinput || []).length) $('#btn_switch').click();
 		});
 		$('#btn_switch').click(function(){
-			if(video_obj.data('stream')==null) {
+			if(video_obj.data('stream')==null && !video_obj.data('cameraRequest')) {
 				let opt = video_obj.camera('setting');
 				let device_audio = $('#list_audio').val();
 				let device_video = $('#list_camera').val();
@@ -166,7 +171,7 @@
 			});
 		});
 		$('#btn_record_video').click(function(){
-			$('#audio').data('audio').pause();
+			$('#audio').data('audio')?.pause();
 			let result = video_obj.camera('record', function (e) {
 				let chunks = e.data;
 				if(chunks.size<500) return;
@@ -216,7 +221,7 @@
 			}
 		});
 		$('#btn_record_audio').click(function(){
-			$('#audio').data('audio').pause();
+			$('#audio').data('audio')?.pause();
 			let result = $('#audio').audio('record', function(blob){
 				const file = new File([blob], "record_"+Math.round(new Date().getTime()/1000) +".mp3", {type: 'audio/mp3'});
 				let audioTag = document.createElement('audio');

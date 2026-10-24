@@ -70,41 +70,46 @@
              */
         };
 
-    !function(){
-        if(document.location.protocol==='http:') {
-            alert("媒体设备调用只能在SSL安全模式下使用，正在尝试跳转！");
-            location.href = 'https://' + document.location.hostname + document.location.pathname;
-        }
-        window.requestAnimationFrame = window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || window.msRequestAnimationFrame;
-        window.URL = window.URL || window.webkitURL || window.mozURL || window.msURL;
-        // 老的浏览器可能根本没有实现 mediaDevices，所以我们可以先设置一个空的对象
-        if (navigator.mediaDevices === undefined) {
-            navigator.mediaDevices = {};
-        }
-        // 一些浏览器部分支持 mediaDevices。我们不能直接给对象设置 getUserMedia
-        // 因为这样可能会覆盖已有的属性。这里我们只会在没有getUserMedia属性的时候添加它。
-        if (navigator.mediaDevices.getUserMedia === undefined) {
-            navigator.mediaDevices.getUserMedia = function(constraints) {
-                // 首先，如果有getUserMedia的话，就获得它
-                let getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
-                // 一些浏览器根本没实现它 - 那么就返回一个error到promise的reject来保持一个统一的接口
-                if (!getUserMedia) {
-                    return Promise.reject(new Error('当前浏览器不支持调用媒体设备！'));
-                }
-                // 否则，为老的navigator.getUserMedia方法包裹一个Promise
-                return new Promise(function(resolve, reject) {
-                    getUserMedia.call(navigator, constraints, resolve, reject);
-                });
-            }
-        }
-    }();
 
+    function notify(target, error, kind) {
+        const messages = {
+            NotFoundError: '未检测到可用的' + (kind === 'audio' ? '麦克风' : '摄像头或麦克风') + '，请连接设备后重试。',
+            DevicesNotFoundError: '未检测到媒体设备，请连接设备后重试。',
+            NotAllowedError: '媒体访问被拒绝，请在浏览器的网站权限中允许摄像头或麦克风，然后重试。',
+            PermissionDeniedError: '媒体访问被拒绝，请检查浏览器的网站权限。',
+            NotReadableError: '设备无法读取，可能正被其他程序占用，请关闭占用程序后重试。',
+            TrackStartError: '设备无法启动，可能正被其他程序占用。',
+            OverconstrainedError: '当前设备不支持所选参数，请切换设备或降低分辨率后重试。',
+            SecurityError: '浏览器阻止了媒体访问，请使用 HTTPS 并检查网站权限。'
+        };
+        const message = messages[error.name] || error.message || '媒体设备调用失败，请检查设备连接及浏览器权限。';
+        const obj = $(target), id = kind === 'audio' ? 'audio' : 'camera';
+        let notice = obj.data('mediaNotice-' + id);
+        if (!notice || !notice[0].isConnected) {
+            notice = $('<div role="alert" class="alert alert-warning my-2 media-notice">').css({textAlign:'left', fontSize:14});
+            obj.after(notice); obj.data('mediaNotice-' + id, notice);
+        }
+        notice.text(message).show();
+        obj.trigger('media:error', [{message, name: error.name || 'Error', kind: id, error}]);
+    }
+    function available(target, kind) {
+        if (!window.isSecureContext) { notify(target, new Error('媒体设备需要 HTTPS；本机也可通过 localhost 访问。'), kind); return false; }
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+            notify(target, new Error('当前浏览器不支持媒体设备调用，请使用支持摄像头/麦克风的浏览器。'), kind); return false;
+        }
+        return true;
+    }
+    function clearNotice(target, kind) {
+        const notice = $(target).data('mediaNotice-' + kind); if (notice) notice.hide();
+    }
+    function safePlay(media) {
+        const promise = media.play(); if (promise) promise.catch(function () {});
+    }
     // Video Functions
     $.fn.camera = function(opt) {
         let videoObj = this.get(0);
         if(typeof(opt)==='object') {
             $.extend(constraints, default_constraints, opt);
-            $(videoObj).data('stream', null);
             opt = 'start';
         }
         if(typeof arguments[1] === 'undefined') {
@@ -124,7 +129,7 @@
                 break;
             case 'r':
             case 'record':
-                return record(arguments[1]);
+                try { return record(arguments[1]); } catch (error) { notify(videoObj, error, 'camera'); return false; }
             case 'c':
             case 'close':
                 close(arguments[1]);
@@ -139,54 +144,39 @@
                 }
                 start(arguments[1]);
         }
+
         function start(func) {
             close();
-            let supportedConstraints = navigator.mediaDevices.getSupportedConstraints();
-            if (!supportedConstraints.width || !supportedConstraints.height || !supportedConstraints.frameRate || !supportedConstraints.facingMode) {
-                new Error('当前浏览器不支持某些摄像头属性设置！')
-            }
+            if (!available(videoObj, 'camera')) return;
+            clearNotice(videoObj, 'camera');
+            const request = {};
+            $(videoObj).data('cameraRequest', request);
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(stream) {
-                    // 旧的浏览器可能没有srcObject
-                    if ("srcObject" in videoObj) {
-                        videoObj.srcObject = stream;
-                        videoObj.setAttribute("playsinline", true);
-                    } else {
-                        // 防止在新的浏览器里使用它，应为它已经不再支持了
-                        videoObj.src = window.URL.createObjectURL(stream);
+                    if ($(videoObj).data('cameraRequest') !== request) { stream.getTracks().forEach(track => track.stop()); return; }
+                    if (constraints.video !== false && !stream.getVideoTracks().length) {
+                        stream.getTracks().forEach(track => track.stop());
+                        throw new DOMException('未检测到可用摄像头', 'NotFoundError');
                     }
-                    $(videoObj).data('stream', stream);
-                    stream.getVideoTracks().forEach(function(track){
-                        if(track.readyState === 'live') {
-                            let cap = track.getCapabilities(),
-                                rate = constraints.video.rate || constraints.video.aspectRatio;
-                            constraints.video.width = cap.width.max;
-                            constraints.video.height = cap.height.max;
-                            if(rate) {
-                                let the_height = constraints.video.width / rate;
-                                if(the_height > constraints.video.height) {
-                                    constraints.video.width = constraints.video.height * rate;
-                                } else {
-                                    constraints.video.height = the_height;
-                                }
-                                constraints.video.resizeMode = 'crop-and-scale';
-                            }
-                            track.applyConstraints(constraints.video);
-                            default_constraints.video.width = constraints.video.width;
-                            default_constraints.video.height = constraints.video.height;
-                        }
-                    })
-                    $(videoObj).data('recorder', null);
-                    videoObj.onloadedmetadata = function(e) {
-                        if(typeof func === 'function') func(e);
-                        videoObj.play();
+                    videoObj.onloadedmetadata = function(event) {
+                        if (typeof func === 'function') func(event);
+                        safePlay(videoObj);
+                        $(videoObj).trigger('media:ready');
                     };
-                })
-                .catch(function(err) {
-                    console.log(err.name + ": " + err.message);
+                    videoObj.srcObject = stream;
+                    videoObj.muted = true;
+                    videoObj.setAttribute('playsinline', '');
+                    $(videoObj).data('stream', stream).data('recorder', null);
+                    clearNotice(videoObj, 'camera');
+                    safePlay(videoObj);
+                }).catch(function(error) {
+                    if ($(videoObj).data('cameraRequest') === request) { $(videoObj).removeData('cameraRequest'); notify(videoObj, error, 'camera'); }
                 });
         }
         function close(func) {
+            $(videoObj).removeData('cameraRequest');
+            const activeRecorder = $(videoObj).data('recorder');
+            if (activeRecorder && activeRecorder.state !== 'inactive') activeRecorder.stop();
             if($(videoObj).data('stream')!=null) {
                 $(videoObj).data('stream').getTracks().forEach(function(track){
                     track.stop();
@@ -198,28 +188,28 @@
                 videoObj.loop = true;
                 videoObj.src = 'noise.mp4';
                 videoObj.load();
-                videoObj.play();
+                safePlay(videoObj);
             }
             if(typeof func === 'function') func();
         }
+
         function enumerate(func) {
-            if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
-                navigator.mediaDevices.enumerateDevices()
-                    .then(function(devices){
-                        let result = {};
-                        devices.forEach(function(device) {
-                            let kind = device.kind.toLowerCase();
-                            if(typeof result[kind] === 'undefined') result[kind] = [];
-                            result[kind].push(device);
-                        });
-                        func(result);
-                    })
-                    .catch(function(err) {
-                        new Error(err.name + ": " + err.message)
-                    });
+            if (!available(videoObj, 'camera') || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
+                if (typeof func === 'function') func({}); return;
             }
+            navigator.mediaDevices.enumerateDevices().then(function(devices) {
+                const result = {};
+                devices.forEach(device => { (result[device.kind] || (result[device.kind] = [])).push(device); });
+                if (!(result.videoinput || []).length) notify(videoObj, new DOMException('未发现摄像头', 'NotFoundError'), 'camera');
+                if (typeof func === 'function') func(result);
+            }).catch(function(error) { notify(videoObj, error, 'camera'); if (typeof func === 'function') func({}); });
         }
         function record(func) {
+            const stream = $(videoObj).data('stream');
+            if (!stream || !stream.getVideoTracks().some(track => track.readyState === 'live')) {
+                notify(videoObj, new Error('摄像头尚未开启或已断开，请先开启摄像头。'), 'camera'); return false;
+            }
+            if (!window.MediaRecorder) { notify(videoObj, new Error('当前浏览器不支持录像。'), 'camera'); return false; }
             if("onorientationchange" in window) {
                 window.onorientationchange = function(e) {
                     if(window.orientation!==0 && window.orientation!==90) {
@@ -231,17 +221,17 @@
             let flag = false;
             let recorder = $(videoObj).data('recorder');
             if(recorder==null) {
-                recorder = new MediaRecorder($(videoObj).data('stream'));
-                recorder.mimeType = 'video/mp4';
+                let videoType = ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'].find(type => MediaRecorder.isTypeSupported(type));
+                recorder = new MediaRecorder($(videoObj).data('stream'), videoType ? {mimeType: videoType} : undefined);
                 recorder.ondataavailable = func;
                 recorder.start();
                 $(videoObj).data('recorder', recorder);
                 $('#video').fullscreen('r');
                 setTimeout(function(){
                     $(document).one('fullscreenchange', function(){
-                        recorder.stop();
+                        if (recorder.state !== 'inactive') recorder.stop();
                         $(videoObj).data('recorder', null);
-                        videoObj.play();
+                        safePlay(videoObj);
                     })
                     $(videoObj).one('pause', function() {
                         $('#video').fullscreen('e');
@@ -255,6 +245,7 @@
             return flag;
         }
         function snap(func) {
+            if (!videoObj || videoObj.readyState < 2 || !videoObj.videoWidth) { notify(videoObj, new Error('摄像头画面尚未就绪，请先开启摄像头后再截图。'), 'camera'); return; }
             let canvas = document.createElement('canvas');
             canvas.width = $(videoObj).width();
             canvas.height = $(videoObj).height();
@@ -267,6 +258,14 @@
 
     //audio Functions
     $.fn.audio = function(opt) {
+        if (opt === 'enum') {
+            const callback = arguments[1], target = this[0];
+            if (!available(target, 'audio')) { if (typeof callback === 'function') callback([]); return this; }
+            navigator.mediaDevices.enumerateDevices().then(devices => {
+                if (typeof callback === 'function') callback(devices.filter(device => device.kind === 'audioinput'));
+            }).catch(error => { notify(target, error, 'audio'); if (typeof callback === 'function') callback([]); });
+            return this;
+        }
         let canvasObj, audioObj, func_show, dataArray;
         let para = {},
             mainObj = this,
@@ -290,8 +289,8 @@
             this.data('canvas', canvasObj);
             this.data('audio', audioObj);
             this.data('stop', 'n');
-            init_audio();
-            init_canvas();
+            try { init_audio(); init_canvas(); }
+            catch (error) { this.removeData('audio'); notify(this[0], error, 'audio'); return this; }
             mainObj.data('para', para);
         } else {
             canvasObj = this.data('canvas');
@@ -430,11 +429,12 @@
                     para.audioAnalyser.getByteTimeDomainData(dataArray);
                 };
             }).catch(function(e) {
-                console.log(e);
+                notify(mainObj[0], new Error('音频文件无法播放，请重新选择音乐或检查文件是否存在。'), 'audio');
             });
         }
 
         function soundWave() {
+            if (!available(mainObj[0], 'audio')) return;
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(function(stream) {
                     if(typeof para.audioContext === 'undefined') return;
@@ -462,7 +462,7 @@
                         }, 100);
                     });
                 }).catch(function(err) {
-                    console.log(err.name + ": " + err.message);
+                    notify(mainObj[0], err, 'audio');
                 });
         }
 
@@ -478,12 +478,18 @@
         }
 
         function record(func, format) {
+            if (!available(mainObj[0], 'audio')) return false;
+            if (!window.MediaRecorder) { notify(mainObj[0], new Error('当前浏览器不支持录音。'), 'audio'); return false; }
+            if (mainObj.data('recordingPending')) { notify(mainObj[0], new Error('正在等待麦克风权限，请先完成浏览器权限选择。'), 'audio'); return true; }
             let mediaRecorder = mainObj.data('mediaRecorder');
             if(mediaRecorder==null) {
+                mainObj.data('recordingPending', true);
                 navigator.mediaDevices.getUserMedia(constraints)
                     .then(function(stream) {
-                        mediaRecorder = new MediaRecorder(stream);
-                        mediaRecorder.mimeType = 'audio/webm';
+                        mainObj.removeData('recordingPending');
+                        clearNotice(mainObj[0], 'audio');
+                        let audioType = ['audio/webm', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
+                        mediaRecorder = new MediaRecorder(stream, audioType ? {mimeType: audioType} : undefined);
                         mediaRecorder.ondataavailable = function (e) {
                             let chunks = e.data;
                             if(chunks.size<500) return;
@@ -502,10 +508,12 @@
                                 fileReader.readAsArrayBuffer(chunks);
                             }
                         }
+                        mediaRecorder.onstop = function() { stream.getTracks().forEach(track => track.stop()); };
                         mediaRecorder.start();
                         mainObj.data('mediaRecorder', mediaRecorder);
                     }).catch(function(err) {
-                        console.log(err.name + ": " + err.message);
+                        mainObj.removeData('recordingPending');
+                        notify(mainObj[0], err, 'audio');
                     });
                 return true;
             } else {
